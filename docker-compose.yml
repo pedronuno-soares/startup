@@ -1,0 +1,66 @@
+networks:
+  public_net:
+    driver: bridge
+  audit_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  pg_data:
+  node1_data:
+  node2_data:
+  node3_data:
+
+services:
+  orchestrator:
+    build: ./orchestrator
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DB_HOST=postgres_db
+    ports:
+      - "8888:8080"
+    networks:
+      - public_net
+      - audit_net
+    depends_on:
+      - postgres_db
+      - audit_node_1
+      - audit_node_2
+      - audit_node_3
+
+  postgres_db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=secure_pass
+      - POSTGRES_DB=dems_orchestrator
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - audit_net
+
+  audit_node_1:
+    image: mongo:6.0
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - node1_data:/data/db
+    networks:
+      - audit_net
+
+  audit_node_2:
+    image: mongo:6.0
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - node2_data:/data/db
+    networks:
+      - audit_net
+
+  audit_node_3:
+    image: mongo:6.0
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    volumes:
+      - node3_data:/data/db
+    networks:
+      - audit_net

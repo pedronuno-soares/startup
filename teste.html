@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste de Upload DEMS</title>
+</head>
+<body style="font-family: Arial; padding: 50px;">
+    <h2>Testar Upload para o Orquestrador 🚀</h2>
+
+    <form action="http://localhost:8888/api/v1/evidence/upload" method="POST" enctype="multipart/form-data">
+        <p>
+            <input type="file" name="evidence_file" required>
+        </p>
+        <button type="submit" style="padding: 10px 20px; background: #007acc; color: white; border: none; cursor: pointer;">
+            Enviar Documento
+        </button>
+    </form>
+</body> 
+</html>
