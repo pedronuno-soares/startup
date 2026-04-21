@@ -3,7 +3,7 @@ networks:
     driver: bridge
   audit_net:
     driver: bridge
-    internal: true
+    internal: true   # REQ-01: Audit nodes are strictly isolated from the internet
 
 volumes:
   pg_data:
@@ -12,6 +12,8 @@ volumes:
   node3_data:
 
 services:
+
+  # ── Orchestrator (API Gateway) ─────────────────────────────
   orchestrator:
     build: ./orchestrator
     env_file:
@@ -19,17 +21,31 @@ services:
     environment:
       - NODE_ENV=production
       - DB_HOST=postgres_db
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=secure_pass
+      - POSTGRES_DB=dems_orchestrator
     ports:
       - "8888:8080"
     networks:
       - public_net
       - audit_net
+    volumes:
+      # Mount Google service account key if present (optional)
+      - ./google-key.json:/app/google-key.json:ro
     depends_on:
-      - postgres_db
-      - audit_node_1
-      - audit_node_2
-      - audit_node_3
+      postgres_db:
+        condition: service_healthy
+      audit_node_1:
+        condition: service_started
+      audit_node_2:
+        condition: service_started
+      audit_node_3:
+        condition: service_started
+      mongo-init:
+        condition: service_completed_successfully
+    restart: on-failure
 
+  # ── PostgreSQL (Auth DB) ───────────────────────────────────
   postgres_db:
     image: postgres:15
     environment:
@@ -38,9 +54,16 @@ services:
       - POSTGRES_DB=dems_orchestrator
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./db-init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - audit_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d dems_orchestrator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
+  # ── Audit Node 1 ──────────────────────────────────────────
   audit_node_1:
     image: mongo:6.0
     command: ["--replSet", "rs0", "--bind_ip_all"]
@@ -48,7 +71,9 @@ services:
       - node1_data:/data/db
     networks:
       - audit_net
+    restart: unless-stopped
 
+  # ── Audit Node 2 ──────────────────────────────────────────
   audit_node_2:
     image: mongo:6.0
     command: ["--replSet", "rs0", "--bind_ip_all"]
@@ -56,7 +81,9 @@ services:
       - node2_data:/data/db
     networks:
       - audit_net
+    restart: unless-stopped
 
+  # ── Audit Node 3 ──────────────────────────────────────────
   audit_node_3:
     image: mongo:6.0
     command: ["--replSet", "rs0", "--bind_ip_all"]
@@ -64,3 +91,36 @@ services:
       - node3_data:/data/db
     networks:
       - audit_net
+    restart: unless-stopped
+
+  # ── MongoDB Replica Set Initialiser (one-shot) ─────────────
+  # REQ-02: Bootstraps the rs0 replica set so all 3 nodes are
+  # aware of each other. Runs once and exits.
+  # The ConsensusManager treats them as INDEPENDENT connections
+  # (BFT fan-out) not as a replica set from Mongoose's perspective.
+  mongo-init:
+    image: mongo:6.0
+    networks:
+      - audit_net
+    depends_on:
+      - audit_node_1
+      - audit_node_2
+      - audit_node_3
+    # Wait for all nodes to be ready, then initialise the replica set
+    entrypoint: >
+      bash -c "
+        echo '⏳ Waiting for audit nodes...' &&
+        sleep 10 &&
+        mongosh --host audit_node_1:27017 --eval '
+          rs.initiate({
+            _id: \"rs0\",
+            members: [
+              { _id: 0, host: \"audit_node_1:27017\" },
+              { _id: 1, host: \"audit_node_2:27017\" },
+              { _id: 2, host: \"audit_node_3:27017\" }
+            ]
+          })
+        ' &&
+        echo '✅ Replica set rs0 initialised.'
+      "
+    restart: "no"

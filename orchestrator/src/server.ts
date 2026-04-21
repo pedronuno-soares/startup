@@ -1,120 +1,167 @@
-import express, { Request, Response } from 'express';
+// ============================================================
+// DEMS – Orchestrator Entry Point
+// Modo LOCAL_DEV=true: MongoDB local + auth em memória
+// Modo produção: 3 containers Mongo + PostgreSQL
+// ============================================================
+
+// Carrega o .env da raiz do projecto (pasta acima de orchestrator/)
+import path from 'path';
+require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+
+import express from 'express';
 import { Pool } from 'pg';
-import jwt from 'jsonwebtoken';
-import multer from 'multer';
-import axios from 'axios';
-import FormData from 'form-data';
-import mongoose from 'mongoose';
-import crypto from 'crypto';
-import { google } from 'googleapis';
-import stream from 'stream';
 
-const app = express();
-const PORT = process.env.PORT || 8080;
-app.use(express.json());
+import { consensusManager }     from './services/consensusManager';
+import { createAuthRouter }     from './routes/auth';
+import { createEvidenceRouter } from './routes/evidence';
+import { createDocuSignRouter } from './routes/docusign';
+import { createChainRouter }    from './routes/chain';
 
-// --- CONFIGURAÇÃO GOOGLE DRIVE ---
-const KEY_FILE = './google-key.json';
-const SCOPES = ['https://www.googleapis.com/auth/drive']; 
-const auth = new google.auth.GoogleAuth({ keyFile: KEY_FILE, scopes: SCOPES });
-const drive = google.drive({ version: 'v3', auth });
+const app     = express();
+const PORT    = process.env.PORT || 8888;
+const IS_LOCAL = process.env.LOCAL_DEV === 'true';
 
-// --- LIGAÇÕES ÀS BASES DE DADOS ---
-const pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.POSTGRES_USER || 'admin',
-    password: process.env.POSTGRES_PASSWORD || 'secure_pass',
-    database: process.env.POSTGRES_DB || 'dems_orchestrator',
-    port: 5432,
-});
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }));
 
-const MONGO_URI = 'mongodb://audit_node_1:27017,audit_node_2:27017,audit_node_3:27017/dems_audit?replicaSet=rs0';
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('✅ Ligado à Cadeia de Custódia (3 Nós ativos)'))
-    .catch(err => console.error('⚠️ MongoDB em espera...'));
+// ── PostgreSQL (opcional em modo local) ───────────────────────
+let pool: Pool | null = null;
 
-const AuditLog = mongoose.model('AuditLog', new mongoose.Schema({
-    cid: { type: String, required: true },
-    fileName: String,
-    driveFileId: String,
-    timestamp: { type: Date, default: Date.now },
-    action: String
-}));
+async function tryConnectPostgres(): Promise<Pool | null> {
+    const p = new Pool({
+        host:     process.env.DB_HOST           || 'localhost',
+        user:     process.env.POSTGRES_USER     || 'postgres',
+        password: process.env.POSTGRES_PASSWORD || 'postgres',
+        database: process.env.POSTGRES_DB       || 'dems_orchestrator',
+        port:     5432,
+        connectionTimeoutMillis: 3000,
+    });
+    try {
+        await p.query('SELECT 1');
+        console.log('✅ [Postgres] Ligado com sucesso.');
+        return p;
+    } catch (err: any) {
+        console.warn(`⚠️  [Postgres] Não disponível (${err.message})`);
+        console.warn('   → Modo local: autenticação via store em memória.');
+        await p.end().catch(() => {});
+        return null;
+    }
+}
 
-const upload = multer({ storage: multer.memoryStorage() });
+// ── Rotas ─────────────────────────────────────────────────────
+// Auth router recebe pool (pode ser null em modo local)
+function setupRoutes(pgPool: Pool | null) {
+    app.use('/api/v1/auth',     createAuthRouter(pgPool));
+    app.use('/api/v1/evidence', createEvidenceRouter());
+    app.use('/api/v1/webhooks', createDocuSignRouter());
+    app.use('/api/v1/chain',    createChainRouter());
 
-// --- ROTA DE UPLOAD ---
-app.post('/api/v1/evidence/upload', upload.single('evidence_file'), (req: Request, res: Response) => {
-    if (!req.file) return res.status(400).json({ error: 'Ficheiro em falta.' });
-
-    const fileBuffer = req.file.buffer;
-    const originalName = req.file.originalname;
-
-    res.status(202).json({
-        status: "PROCESSING",
-        message: "A processar prova digital...",
-        tracking_id: "trk_" + Date.now()
+    // ── Frontend (rota raiz) — serve dashboard.html externo ──
+    app.get('/', (_req, res) => {
+        res.sendFile(path.resolve(__dirname, '../../dashboard.html'));
     });
 
-    setImmediate(async () => {
+    // ── Health ─────────────────────────────────────────────
+    app.get('/api/v1/health', async (_req, res) => {
+        const nodes  = consensusManager.getNodeHealth();
+        const quorum = consensusManager.getQuorumStatus();
+
+        let pgStatus = 'DISABLED (modo local)';
+        if (pgPool) {
+            try { await pgPool.query('SELECT 1'); pgStatus = 'OK'; }
+            catch { pgStatus = 'DEGRADED'; }
+        }
+
+        res.status(quorum.quorumAchievable ? 200 : 503).json({
+            status:     quorum.quorumAchievable ? 'HEALTHY' : 'DEGRADED',
+            mode:       IS_LOCAL ? 'LOCAL_DEV' : 'PRODUCTION',
+            postgres:   pgStatus,
+            auditNodes: nodes,
+            quorum,
+            uptime:     process.uptime(),
+            timestamp:  new Date().toISOString(),
+        });
+    });
+
+    // ── Integridade da cadeia ───────────────────────────────
+    app.get('/api/v1/health/chain', async (_req, res) => {
         try {
-            console.log(`\n📥 [DEMS] Processando: ${originalName}`);
-
-            // 1. IPFS (Pinata) - LIMPEZA E DIAGNÓSTICO
-            const rawToken = "COLA_AQUI_O_TEU_JWT_NOVO_DO_SITE"; 
-            const pinataToken = rawToken.replace(/\s+/g, '').trim();
-            
-            // Log de diagnóstico para sabermos se o Token está inteiro
-            console.log(`📡 [IPFS] Debug Token: Inicia com "${pinataToken.substring(0, 10)}..." e termina com "...${pinataToken.substring(pinataToken.length - 10)}"`);
-            console.log(`📡 [IPFS] Segmentos detetados: ${pinataToken.split('.').length}`);
-
-            const formData = new FormData();
-            formData.append('file', fileBuffer, originalName);
-            
-            const pinataRes = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
-                headers: { 
-                    ...formData.getHeaders(), 
-                    'Authorization': `Bearer ${pinataToken}` 
-                }
+            const integrity = await consensusManager.verifyChainIntegrity(0);
+            res.status(integrity.valid ? 200 : 409).json({
+                ...integrity,
+                status: integrity.valid ? 'CHAIN_INTACT' : 'CHAIN_COMPROMISED',
             });
-            const cid = pinataRes.data.IpfsHash;
-            console.log(`✅ [IPFS] CID IMUTÁVEL: ${cid}`);
-
-            // 2. CIFRAGEM (AES-256)
-            const encryptionKey = crypto.scryptSync('password_super_secreta_dems', 'salt', 32); 
-            const iv = crypto.randomBytes(16);
-            const cipher = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
-            const encryptedBuffer = Buffer.concat([cipher.update(fileBuffer), cipher.final()]);
-            console.log(`🔒 [AES-256] Ficheiro cifrado.`);
-
-            // 3. GOOGLE DRIVE (Com tratamento de erro de quota)
-            let driveId = "OFFLINE";
-            try {
-                const bufferStream = new stream.PassThrough();
-                bufferStream.end(encryptedBuffer);
-                const driveRes = await drive.files.create({
-                    requestBody: { name: originalName + '.enc', parents: ['1A3wtMrS5QbrDNejuVXQFGfstUmOV8qgf'] },
-                    media: { mimeType: 'application/octet-stream', body: bufferStream },
-                    supportsAllDrives: true
-                } as any);
-                driveId = driveRes.data.id || "OFFLINE";
-                console.log(`✅ [Drive] Backup: ${driveId}`);
-            } catch (dErr) {
-                console.warn(`⚠️ [Drive] Ignorado por quota (O IPFS é a prova principal).`);
-            }
-
-            // 4. BLOCKCHAIN (MongoDB)
-            const log = new AuditLog({ cid, fileName: originalName, driveFileId: driveId, action: 'SECURED' });
-            await log.save();
-            console.log(`⛓️ [CADEIA] Prova registada nos 3 nós!`);
-
         } catch (err: any) {
-            console.error("❌ Erro:");
-            if (err.response) {
-                console.error(`Status: ${err.response.status} - Detalhes:`, JSON.stringify(err.response.data));
-            } else {
-                console.error(err.message);
-            }
+            res.status(503).json({ error: err.message });
         }
     });
-});
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────
+async function bootstrap(): Promise<void> {
+    console.log('');
+    console.log('╔══════════════════════════════════════════════╗');
+    console.log('║   DEMS – Distributed Chain of Custody System ║');
+    console.log('║   Orquestrador v1.0                          ║');
+    console.log('╚══════════════════════════════════════════════╝');
+    console.log('');
+
+    if (IS_LOCAL) {
+        console.log('🛠️  MODO LOCAL ACTIVO (LOCAL_DEV=true)');
+        console.log('   • MongoDB: 3 bases de dados locais (dems_audit_node1/2/3)');
+        console.log('   • Auth: store em memória (sem PostgreSQL)');
+        console.log('');
+    }
+
+    // Tentar ligar ao Postgres
+    pool = await tryConnectPostgres();
+
+    // Ligar ao Consensus Manager (com retry)
+    const MAX_RETRIES = IS_LOCAL ? 3 : 10;
+    const RETRY_DELAY = IS_LOCAL ? 2000 : 5000;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            await consensusManager.initialise();
+            break;
+        } catch (err: any) {
+            if (attempt === MAX_RETRIES) {
+                console.error(`\n❌ Não foi possível estabelecer quórum após ${MAX_RETRIES} tentativas.`);
+                if (IS_LOCAL) {
+                    console.error('   Certifica-te que o MongoDB está a correr: mongod --dbpath ~/data/db');
+                }
+                process.exit(1);
+            }
+            console.warn(`⏳ Tentativa ${attempt}/${MAX_RETRIES} — a tentar novamente em ${RETRY_DELAY / 1000}s...`);
+            await new Promise(r => setTimeout(r, RETRY_DELAY));
+        }
+    }
+
+    setupRoutes(pool);
+
+    app.listen(Number(PORT), '0.0.0.0', () => {
+        console.log('');
+        console.log(`✅ Orquestrador DEMS a correr em http://localhost:${PORT}`);
+        console.log('');
+        console.log('  📌 Endpoints disponíveis:');
+        console.log(`     POST  http://localhost:${PORT}/api/v1/auth/login`);
+        console.log(`     POST  http://localhost:${PORT}/api/v1/evidence/upload  (Bearer token)`);
+        console.log(`     GET   http://localhost:${PORT}/api/v1/health`);
+        console.log(`     GET   http://localhost:${PORT}/api/v1/health/chain`);
+        console.log(`     POST  http://localhost:${PORT}/api/v1/webhooks/docusign`);
+        console.log(`     GET   http://localhost:${PORT}/api/v1/chain/blocks      (Bearer token)`);
+        console.log(`     GET   http://localhost:${PORT}/api/v1/chain/block/:hash (Bearer token)`);
+        console.log(`     POST  http://localhost:${PORT}/api/v1/chain/verify-file (público)`);
+        console.log(`     GET   http://localhost:${PORT}/api/v1/chain/integrity   (público)`);
+        console.log('');
+        if (IS_LOCAL) {
+            console.log('  🔑 Credenciais de teste:');
+            console.log('     investigador.silva@policia.pt / senha_super_segura');
+            console.log('     perito.costa@policia.pt       / senha_super_segura');
+            console.log('     juiz.ferreira@tribunal.pt     / senha_super_segura');
+            console.log('');
+        }
+    });
+}
+
+bootstrap();

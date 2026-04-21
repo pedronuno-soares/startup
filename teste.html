@@ -1,18 +1,223 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt">
 <head>
-    <title>Teste de Upload DEMS</title>
-</head>
-<body style="font-family: Arial; padding: 50px;">
-    <h2>Testar Upload para o Orquestrador 🚀</h2>
+<meta charset="UTF-8">
+<title>DEMS – Teste</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    background: #0a0f1e;
+    color: #e2e8f0;
+    padding: 40px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 24px; margin-bottom: 6px; color: #00d4ff; }
+  .sub { color: #64748b; font-size: 14px; margin-bottom: 32px; }
 
-    <form action="http://localhost:8888/api/v1/evidence/upload" method="POST" enctype="multipart/form-data">
-        <p>
-            <input type="file" name="evidence_file" required>
-        </p>
-        <button type="submit" style="padding: 10px 20px; background: #007acc; color: white; border: none; cursor: pointer;">
-            Enviar Documento
-        </button>
-    </form>
-</body> 
+  .card {
+    background: #111d35;
+    border: 1px solid #1e3a5f;
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+    max-width: 640px;
+  }
+  .card h2 { font-size: 15px; margin-bottom: 16px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+
+  label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; margin-top: 12px; }
+  input, select {
+    width: 100%; padding: 10px 12px;
+    background: #070b14; border: 1px solid #1e3a5f;
+    border-radius: 8px; color: #e2e8f0; font-size: 14px;
+  }
+  input[type=file] { padding: 8px; }
+
+  button {
+    margin-top: 16px; width: 100%;
+    padding: 12px; border: none; border-radius: 8px; cursor: pointer;
+    font-size: 14px; font-weight: 600;
+    background: linear-gradient(135deg, #00d4ff, #7c3aed);
+    color: white; transition: opacity .2s;
+  }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  .response {
+    margin-top: 12px; padding: 12px;
+    background: #070b14; border: 1px solid #1e3a5f; border-radius: 8px;
+    font-family: 'Cascadia Code', 'Courier New', monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 200px; overflow-y: auto; line-height: 1.6;
+    display: none;
+  }
+  .response.ok    { border-color: #10b981; color: #6ee7b7; }
+  .response.error { border-color: #ef4444; color: #fca5a5; }
+
+  .token-display {
+    margin-top: 10px; padding: 10px 12px;
+    background: #070b14; border: 1px solid #10b981; border-radius: 8px;
+    font-family: monospace; font-size: 11px; color: #10b981;
+    word-break: break-all; display: none;
+  }
+
+  .status-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 16px; border-radius: 8px;
+    background: #111d35; border: 1px solid #1e3a5f;
+    margin-bottom: 24px; max-width: 640px; font-size: 13px;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; flex-shrink: 0; animation: pulse 2s infinite; }
+  .dot.online { background: #10b981; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+  .nodes { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .node-chip {
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
+    background: rgba(16,185,129,.15); border: 1px solid #10b981; color: #10b981;
+  }
+  .node-chip.down { background: rgba(239,68,68,.15); border-color: #ef4444; color: #ef4444; }
+</style>
+</head>
+<body>
+
+<h1>⛓️ DEMS – Chain of Custody</h1>
+<p class="sub">Distributed Evidence Management System · BFT-Lite Consensus · Modo Local</p>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="dot" id="dot"></div>
+  <div>
+    <span id="statusText">A verificar servidor...</span>
+    <div class="nodes" id="nodesRow"></div>
+  </div>
+</div>
+
+<!-- 1. Login -->
+<div class="card">
+  <h2>🔑 Passo 1 — Login</h2>
+  <label>Utilizador</label>
+  <select id="email">
+    <option value="investigador.silva@policia.pt">Investigador Silva</option>
+    <option value="perito.costa@policia.pt">Perito Costa</option>
+    <option value="juiz.ferreira@tribunal.pt">Juiz Ferreira</option>
+  </select>
+  <label>Password</label>
+  <input type="password" id="password" value="senha_super_segura">
+  <button onclick="doLogin()">🔐 Fazer Login e Obter Token JWT</button>
+  <div class="token-display" id="tokenBox"></div>
+  <div class="response" id="loginResp"></div>
+</div>
+
+<!-- 2. Upload -->
+<div class="card">
+  <h2>📁 Passo 2 — Upload de Prova Digital</h2>
+  <label>Ficheiro de Prova (qualquer ficheiro)</label>
+  <input type="file" id="evidenceFile" name="evidence_file">
+  <button id="btnUpload" onclick="doUpload()">⬆️ Enviar Documento (BFT Consensus)</button>
+  <div class="response" id="uploadResp"></div>
+</div>
+
+<!-- 3. Chain -->
+<div class="card">
+  <h2>🔗 Passo 3 — Verificar Cadeia Hash</h2>
+  <button onclick="checkChain()">🔍 Verificar Integridade da Cadeia</button>
+  <div class="response" id="chainResp"></div>
+</div>
+
+<script>
+  const API = 'http://localhost:8888/api/v1';
+  let token = null;
+
+  // ── Health check automático ───────────────────────────────────
+  async function checkHealth() {
+    try {
+      const r = await fetch(`${API}/health`);
+      const d = await r.json();
+      const ok = d.quorum?.quorumAchievable;
+      document.getElementById('dot').className = 'dot' + (ok ? ' online' : '');
+      document.getElementById('statusText').textContent =
+        ok ? `✅ Servidor online · 3/3 nós activos · Quórum BFT garantido` : '⚠️ Quórum degradado';
+      document.getElementById('nodesRow').innerHTML = (d.auditNodes||[]).map((n,i) =>
+        `<span class="node-chip ${n.healthy?'':'down'}">Node ${i+1} ${n.healthy?'✓':'✗'}</span>`
+      ).join('');
+    } catch {
+      document.getElementById('dot').className = 'dot';
+      document.getElementById('statusText').textContent = '❌ Servidor offline — corre o servidor no terminal';
+      document.getElementById('nodesRow').innerHTML = '';
+    }
+  }
+  checkHealth();
+  setInterval(checkHealth, 10000);
+
+  // ── Login ─────────────────────────────────────────────────────
+  async function doLogin() {
+    const btn = document.querySelector('.card:nth-child(2) button');
+    btn.textContent = '⏳ A autenticar...'; btn.disabled = true;
+    const resp = document.getElementById('loginResp');
+    const tbox = document.getElementById('tokenBox');
+    resp.style.display = 'none'; tbox.style.display = 'none';
+    try {
+      const r = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value })
+      });
+      const d = await r.json();
+      if (r.ok && d.token) {
+        token = d.token;
+        tbox.style.display = 'block';
+        tbox.textContent = `✅ Logado como: ${d.user.name} (${d.user.role})\nToken: ${d.token.substring(0,50)}...`;
+        resp.className = 'response ok'; resp.style.display = 'block';
+        resp.textContent = JSON.stringify(d.user, null, 2);
+      } else {
+        resp.className = 'response error'; resp.style.display = 'block';
+        resp.textContent = JSON.stringify(d, null, 2);
+      }
+    } catch(e) {
+      resp.className = 'response error'; resp.style.display = 'block';
+      resp.textContent = '❌ ' + e.message;
+    } finally { btn.textContent = '🔐 Fazer Login e Obter Token JWT'; btn.disabled = false; }
+  }
+
+  // ── Upload ────────────────────────────────────────────────────
+  async function doUpload() {
+    const resp = document.getElementById('uploadResp');
+    const file = document.getElementById('evidenceFile').files[0];
+    if (!token) { resp.className='response error'; resp.style.display='block'; resp.textContent='❌ Faz login primeiro (Passo 1)!'; return; }
+    if (!file)  { resp.className='response error'; resp.style.display='block'; resp.textContent='❌ Selecciona um ficheiro.'; return; }
+    const btn = document.getElementById('btnUpload');
+    btn.textContent = '⏳ A enviar...'; btn.disabled = true;
+    resp.className = 'response'; resp.style.display = 'block';
+    resp.textContent = `⏳ A enviar "${file.name}" → IPFS → AES-256 → BFT Consensus (3 nós)...`;
+    try {
+      const form = new FormData();
+      form.append('evidence_file', file);
+      const r = await fetch(`${API}/evidence/upload`, {
+        method: 'POST',
+        headers: {'Authorization': `Bearer ${token}`},
+        body: form
+      });
+      const d = await r.json();
+      resp.className = `response ${r.ok ? 'ok' : 'error'}`;
+      resp.textContent = JSON.stringify(d, null, 2);
+      if (r.ok) { resp.textContent += '\n\n⛓️ Prova registada! Hash SHA-256 gerada e propagada pelos 3 nós.'; checkHealth(); }
+    } catch(e) {
+      resp.className = 'response error'; resp.textContent = '❌ ' + e.message;
+    } finally { btn.textContent = '⬆️ Enviar Documento (BFT Consensus)'; btn.disabled = false; }
+  }
+
+  // ── Chain ─────────────────────────────────────────────────────
+  async function checkChain() {
+    const resp = document.getElementById('chainResp');
+    resp.className = 'response'; resp.style.display = 'block'; resp.textContent = '⏳ A verificar...';
+    try {
+      const r = await fetch(`${API}/health/chain`);
+      const d = await r.json();
+      resp.className = `response ${d.valid ? 'ok' : 'error'}`;
+      resp.textContent = JSON.stringify(d, null, 2);
+    } catch(e) { resp.className='response error'; resp.textContent='❌ '+e.message; }
+  }
+</script>
+</body>
 </html>
