@@ -6,7 +6,9 @@
 //
 // schemaVersion 2 (BLOCKCHAIN v2):
 //   currentHash = SHA-256(previousHash | blockIndex | timestamp | action | actorID | fileHash | fileName)
-//   fileHash = SHA-256(raw file bytes) — garante imutabilidade do conteúdo
+//
+// schemaVersion 3 (BLOCKCHAIN v3 - Military Grade):
+//   currentHash = SHA-256(previousHash | blockIndex | timestamp | action | actorID | fileHash | fileName | signature | publicKey | timeSource)
 // ============================================================
 
 import mongoose, { Schema, Document, Model } from 'mongoose';
@@ -23,6 +25,7 @@ export interface IAuditEntry extends Document {
 
     // ── Event data ────────────────────────────────────────────
     timestamp:  Date;
+    timeSource: string; // 'NTP_SECURE' | 'LOCAL'
     action:     string;
     actorID:    number;
     actorEmail: string;
@@ -36,12 +39,32 @@ export interface IAuditEntry extends Document {
     fileName:    string;
     driveFileId: string;
 
+    // ── Security & Non-Repudiation ────────────────────────────
+    publicKey:  string;  // User's public key (PEM or Base64)
+    signature:  string;  // Cryptographic signature of the transaction
+
     // ── Consensus ─────────────────────────────────────────────
     consensusCount: number; // 2 or 3
+
+    // ── Forense ───────────────────────────────────────────────
+    metadata: string;       // JSON string de metadados extraídos (ex: EXIF)
 }
 
 // ── Static methods interface ──────────────────────────────────
 interface IAuditEntryModel extends Model<IAuditEntry> {
+    computeHashV3(
+        previousHash: string,
+        blockIndex:   number,
+        timestamp:    Date,
+        action:       string,
+        actorID:      number,
+        fileHash:     string,
+        fileName:     string,
+        signature:    string,
+        publicKey:    string,
+        timeSource:   string,
+        metadata:     string
+    ): string;
     computeHashV2(
         previousHash: string,
         blockIndex:   number,
@@ -72,6 +95,7 @@ const AuditEntrySchema = new Schema<IAuditEntry>(
         blockIndex:    { type: Number, required: true, default: 0 },
 
         timestamp:     { type: Date,   required: true, default: () => new Date() },
+        timeSource:    { type: String, default: 'LOCAL' },
         action:        { type: String, required: true },
         actorID:       { type: Number, required: true },
         actorEmail:    { type: String, required: true },
@@ -83,6 +107,11 @@ const AuditEntrySchema = new Schema<IAuditEntry>(
         envelopeID:    { type: String, default: '' },
         fileName:      { type: String, required: true },
         driveFileId:   { type: String, default: 'OFFLINE' },
+        
+        publicKey:     { type: String, default: 'NONE' },
+        signature:     { type: String, default: 'NONE' },
+
+        metadata:      { type: String, default: 'NONE' },
 
         consensusCount: { type: Number, required: true, min: 0, max: 3 },
     },
@@ -92,7 +121,37 @@ const AuditEntrySchema = new Schema<IAuditEntry>(
 AuditEntrySchema.index({ timestamp: -1 });
 AuditEntrySchema.index({ blockIndex: 1 });
 AuditEntrySchema.index({ actorID: 1 });
-AuditEntrySchema.index({ fileHash: 1 }); // for verify-file lookups
+// for verify-file lookups
+
+// ── Static: SHA-256 hash — Blockchain v3 formula (Military) ──
+AuditEntrySchema.statics.computeHashV3 = function (
+    previousHash: string,
+    blockIndex:   number,
+    timestamp:    Date,
+    action:       string,
+    actorID:      number,
+    fileHash:     string,
+    fileName:     string,
+    signature:    string,
+    publicKey:    string,
+    timeSource:   string,
+    metadata:     string = 'NONE'
+): string {
+    const payload = [
+        previousHash,
+        String(blockIndex),
+        timestamp.toISOString(),
+        action,
+        String(actorID),
+        fileHash,
+        fileName,
+        signature,
+        publicKey,
+        timeSource,
+        metadata
+    ].join('|');
+    return crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
+};
 
 // ── Static: SHA-256 hash — Blockchain v2 formula ─────────────
 AuditEntrySchema.statics.computeHashV2 = function (

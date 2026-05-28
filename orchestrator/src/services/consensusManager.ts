@@ -14,6 +14,9 @@
 
 import mongoose, { Connection, Model } from 'mongoose';
 import crypto from 'crypto';
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { AuditEntrySchema, IAuditEntry } from '../models/AuditEntry';
 
 export interface NewAuditEntry {
@@ -28,6 +31,10 @@ export interface NewAuditEntry {
     // ── Blockchain v2 fields ──────────────────────────────────
     fileHash:    string;  // SHA-256 of raw file bytes
     fileSize:    number;  // bytes
+    // ── Blockchain v3 fields ──────────────────────────────────
+    publicKey?:  string;
+    signature?:  string;
+    metadata?:   string;
 }
 
 export interface ConsensusResult {
@@ -66,6 +73,10 @@ export interface BlockSummary {
     fileCID:        string;
     consensusCount: number;
     schemaVersion:  number;
+    publicKey:      string;
+    signature:      string;
+    timeSource:     string;
+    metadata:       string;
 }
 
 export class ConsensusError extends Error {
@@ -110,12 +121,12 @@ class ConsensusManager {
                 `Mínimo: ${this.QUORUM}`
             );
         }
-        console.log(`🟢 [Consensus] ${healthyCount}/${this.TOTAL_NODES} nós activos. Quórum garantido.\n`);
+        console.log(`[ ONLINE ] [Consensus] ${healthyCount}/${this.TOTAL_NODES} nós activos. Quórum garantido.\n`);
     }
 
     // ── Modo LOCAL ────────────────────────────────────────────
     private async _initialiseLocal(): Promise<void> {
-        console.log('🧪 [Consensus] Modo LOCAL — a iniciar 3 instâncias MongoDB em memória...');
+        console.log('[ TESTE ] [Consensus] Modo LOCAL — a iniciar 3 instâncias MongoDB em memória...');
 
         let MongoMemoryServer: any;
         try {
@@ -131,8 +142,13 @@ class ConsensusManager {
 
         for (let i = 0; i < this.TOTAL_NODES; i++) {
             const nodeName = `audit_node_${i + 1}`;
+            const dbDir = path.join(process.cwd(), '.db', nodeName);
+            if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+
             try {
-                const server: MongoMemoryServer = await MongoMemoryServer.create();
+                const server: MongoMemoryServer = await MongoMemoryServer.create({
+                    instance: { dbPath: dbDir }
+                });
                 const uri = server.getUri();
                 this.memoryServers[i] = server;
 
@@ -143,10 +159,10 @@ class ConsensusManager {
                 this.models[i]      = model;
                 this.nodeStatus[i]  = { name: nodeName, uri, healthy: true, lastError: null };
 
-                console.log(`  ✅ Nó ${i + 1} (${nodeName}) — em memória (porta auto)`);
+                console.log(`  [OK] Nó ${i + 1} (${nodeName}) — persistente (.db/${nodeName})`);
             } catch (err: any) {
                 this.nodeStatus[i] = { name: nodeName, uri: 'N/A', healthy: false, lastError: err.message };
-                console.warn(`  ⚠️  Nó ${i + 1} falhou: ${err.message}`);
+                console.warn(`  [FALHA] Nó ${i + 1} falhou: ${err.message}`);
             }
         }
     }
@@ -159,7 +175,7 @@ class ConsensusManager {
             { name: 'audit_node_3', uri: 'mongodb://audit_node_3:27017/dems_audit' },
         ];
 
-        console.log('🔗 [Consensus] Modo PRODUÇÃO — a ligar aos 3 containers Mongo...');
+        console.log('[Consensus] Modo PRODUÇÃO — a ligar aos 3 containers Mongo...');
         this.nodeStatus = nodeUris.map(n => ({ name: n.name, uri: n.uri, healthy: false, lastError: null }));
 
         await Promise.allSettled(nodeUris.map(async (node, i) => {
@@ -173,14 +189,14 @@ class ConsensusManager {
                 this.connections[i]        = conn;
                 this.models[i]             = model;
                 this.nodeStatus[i].healthy = true;
-                console.log(`  ✅ Nó ${i + 1} (${node.name}) ligado`);
+                console.log(`  [OK] Nó ${i + 1} (${node.name}) ligado`);
 
                 conn.on('disconnected', () => { this.nodeStatus[i].healthy = false; });
                 conn.on('reconnected',  () => { this.nodeStatus[i].healthy = true;  });
             } catch (err: any) {
                 this.nodeStatus[i].healthy   = false;
                 this.nodeStatus[i].lastError = err.message;
-                console.warn(`  ⚠️  Nó ${i + 1} indisponível: ${err.message}`);
+                console.warn(`  [AVISO] Nó ${i + 1} indisponível: ${err.message}`);
             }
         }));
     }
@@ -206,6 +222,36 @@ class ConsensusManager {
             } catch (_) { /* tenta próximo nó */ }
         }
         return { hash: this.GENESIS_HASH, blockIndex: -1 };
+    }
+
+    // ── Hash formula v3 (Blockchain Military Grade) ───────────
+    private _computeHashV3(
+        previousHash: string,
+        blockIndex:   number,
+        timestamp:    Date,
+        action:       string,
+        actorID:      number,
+        fileHash:     string,
+        fileName:     string,
+        signature:    string,
+        publicKey:    string,
+        timeSource:   string,
+        metadata:     string = 'NONE'
+    ): string {
+        const payload = [
+            previousHash,
+            String(blockIndex),
+            timestamp.toISOString(),
+            action,
+            String(actorID),
+            fileHash,
+            fileName,
+            signature,
+            publicKey,
+            timeSource,
+            metadata
+        ].join('|');
+        return crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
     }
 
     // ── Hash formula v2 (Blockchain) ─────────────────────────
@@ -243,13 +289,29 @@ class ConsensusManager {
         return crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
     }
 
+    // ── Secure NTP Timestamp ──────────────────────────────────
+    private async _getSecureTimestamp(): Promise<{ timestamp: Date, timeSource: string }> {
+        try {
+            const res = await axios.get('http://worldtimeapi.org/api/timezone/Etc/UTC', { timeout: 2000 });
+            if (res.data && res.data.datetime) {
+                return { timestamp: new Date(res.data.datetime), timeSource: 'NTP_SECURE' };
+            }
+        } catch (err) {
+            console.warn('[AVISO] [NTP] Fallback to LOCAL time due to API failure.');
+        }
+        return { timestamp: new Date(), timeSource: 'LOCAL' };
+    }
+
     // ── Fan-out + quórum BFT ──────────────────────────────────
     async broadcastAndCommit(entry: NewAuditEntry): Promise<ConsensusResult> {
-        const timestamp = new Date();
+        const { timestamp, timeSource } = await this._getSecureTimestamp();
         const prev      = await this.getPreviousBlockInfo();
         const blockIndex = prev.blockIndex + 1;
 
-        const currentHash = this._computeHashV2(
+        const signature = entry.signature || 'NONE';
+        const publicKey = entry.publicKey || 'NONE';
+
+        const currentHash = this._computeHashV3(
             prev.hash,
             blockIndex,
             timestamp,
@@ -257,14 +319,18 @@ class ConsensusManager {
             entry.actorID,
             entry.fileHash,
             entry.fileName,
+            signature,
+            publicKey,
+            timeSource
         );
 
         const document = {
-            schemaVersion:  2,
+            schemaVersion:  3,
             previousHash:   prev.hash,
             currentHash,
             blockIndex,
             timestamp,
+            timeSource,
             action:         entry.action,
             actorID:        entry.actorID,
             actorEmail:     entry.actorEmail,
@@ -275,6 +341,9 @@ class ConsensusManager {
             envelopeID:     entry.envelopeID ?? '',
             fileName:       entry.fileName,
             driveFileId:    entry.driveFileId,
+            publicKey,
+            signature,
+            metadata:       entry.metadata || 'NONE',
             consensusCount: 0,
         };
 
@@ -293,12 +362,12 @@ class ConsensusManager {
                 successIndices.push(i);
             } else {
                 if (this.nodeStatus[i]) this.nodeStatus[i].lastError = result.reason?.message;
-                console.warn(`  ❌ Nó ${i + 1} falhou: ${result.reason?.message}`);
+                console.warn(`  [ERRO] Nó ${i + 1} falhou: ${result.reason?.message}`);
             }
         });
 
         const successCount = successIndices.length;
-        console.log(`📊 [BFT] ${successCount}/${this.TOTAL_NODES} nós confirmaram`);
+        console.log(`[BFT] ${successCount}/${this.TOTAL_NODES} nós confirmaram`);
 
         if (successCount < this.QUORUM) {
             await this._rollback(successIndices, currentHash);
@@ -311,7 +380,7 @@ class ConsensusManager {
             )
         );
 
-        console.log(`⛓️  [BFT] COMMITTED — Block #${blockIndex} | ${currentHash.substring(0, 12)}... | consensus: ${successCount}/${this.TOTAL_NODES}`);
+        console.log(`[BFT] COMMITTED — Block #${blockIndex} | ${currentHash.substring(0, 12)}... | consensus: ${successCount}/${this.TOTAL_NODES}`);
         return {
             success:        true,
             consensusCount: successCount,
@@ -327,7 +396,7 @@ class ConsensusManager {
         await Promise.allSettled(
             successIndices.map(i =>
                 this.models[i].deleteOne({ currentHash })
-                    .then(() => console.log(`  🔙 Revertido nó ${i + 1}`))
+                    .then(() => console.log(`  [REVERT] Revertido nó ${i + 1}`))
                     .catch(() => {})
             )
         );
@@ -357,6 +426,10 @@ class ConsensusManager {
             fileCID:        r.fileCID ?? '',
             consensusCount: r.consensusCount,
             schemaVersion:  r.schemaVersion ?? 1,
+            publicKey:      r.publicKey ?? 'NONE',
+            signature:      r.signature ?? 'NONE',
+            timeSource:     r.timeSource ?? 'LOCAL',
+            metadata:       r.metadata ?? 'NONE'
         }));
     }
 
@@ -379,6 +452,10 @@ class ConsensusManager {
             fileCID:        raw.fileCID ?? '',
             consensusCount: raw.consensusCount,
             schemaVersion:  raw.schemaVersion ?? 1,
+            publicKey:      raw.publicKey ?? 'NONE',
+            signature:      raw.signature ?? 'NONE',
+            timeSource:     raw.timeSource ?? 'LOCAL',
+            metadata:       raw.metadata ?? 'NONE'
         };
     }
 
@@ -387,7 +464,7 @@ class ConsensusManager {
         if (fileHash === 'LEGACY') return null;
         const model = this._healthyModel(nodeIndex);
         const raw = await model
-            .findOne({ fileHash, schemaVersion: 2 })
+            .findOne({ fileHash, schemaVersion: { $gte: 2 } })
             .sort({ blockIndex: -1 })
             .lean()
             .exec() as any;
@@ -406,7 +483,40 @@ class ConsensusManager {
             fileCID:        raw.fileCID ?? '',
             consensusCount: raw.consensusCount,
             schemaVersion:  raw.schemaVersion,
+            publicKey:      raw.publicKey ?? 'NONE',
+            signature:      raw.signature ?? 'NONE',
+            timeSource:     raw.timeSource ?? 'LOCAL',
+            metadata:       raw.metadata ?? 'NONE',
         };
+    }
+
+    // ── Buscar TODOS os blocos por fileHash ───────────────────
+    async findAllBlocksByFileHash(fileHash: string, nodeIndex = 0): Promise<BlockSummary[]> {
+        if (!fileHash || fileHash === 'LEGACY') return [];
+        const model = this._healthyModel(nodeIndex);
+        const raw = await model
+            .find({ fileHash, schemaVersion: { $gte: 2 } })
+            .sort({ blockIndex: -1 })
+            .lean()
+            .exec() as any[];
+        return raw.map(r => ({
+            blockIndex:     r.blockIndex,
+            currentHash:    r.currentHash,
+            previousHash:   r.previousHash,
+            timestamp:      r.timestamp,
+            action:         r.action,
+            actorEmail:     r.actorEmail,
+            actorRole:      r.actorRole,
+            fileName:       r.fileName,
+            fileHash:       r.fileHash,
+            fileSize:       r.fileSize,
+            fileCID:        r.fileCID ?? '',
+            consensusCount: r.consensusCount,
+            schemaVersion:  r.schemaVersion,
+            publicKey:      r.publicKey ?? 'NONE',
+            signature:      r.signature ?? 'NONE',
+            timeSource:     r.timeSource ?? 'LOCAL',
+        }));
     }
 
     // ── Verificar integridade da cadeia completa ──────────────
@@ -432,7 +542,20 @@ class ConsensusManager {
             const ver  = curr.schemaVersion ?? 1;
 
             let expected: string;
-            if (ver === 2) {
+            if (ver === 3) {
+                expected = this._computeHashV3(
+                    prev.currentHash,
+                    curr.blockIndex,
+                    new Date(curr.timestamp),
+                    curr.action,
+                    curr.actorID,
+                    curr.fileHash,
+                    curr.fileName,
+                    curr.signature ?? 'NONE',
+                    curr.publicKey ?? 'NONE',
+                    curr.timeSource ?? 'LOCAL'
+                );
+            } else if (ver === 2) {
                 v2Blocks++;
                 expected = this._computeHashV2(
                     prev.currentHash,
@@ -468,10 +591,10 @@ class ConsensusManager {
         }
 
         // Count totals
-        entries.forEach(e => { (e.schemaVersion ?? 1) === 2 ? v2Blocks++ : legacyBlocks++; });
-        // Avoid double counting from the loop
+        entries.forEach(e => { (e.schemaVersion ?? 1) >= 2 ? v2Blocks++ : legacyBlocks++; });
+
         legacyBlocks = entries.filter(e => (e.schemaVersion ?? 1) === 1).length;
-        v2Blocks     = entries.filter(e => e.schemaVersion === 2).length;
+        v2Blocks     = entries.filter(e => (e.schemaVersion ?? 1) >= 2).length;
 
         return { valid: true, totalBlocks: entries.length, legacyBlocks, v2Blocks };
     }
@@ -495,6 +618,75 @@ class ConsensusManager {
     async shutdown(): Promise<void> {
         await Promise.allSettled(this.connections.map(c => c.close()));
         await Promise.allSettled(this.memoryServers.map(s => s?.stop?.()));
+    }
+
+    // ── Chaos Monkey (Demonstration) ──────────────────────────
+    async killNode(index: number): Promise<void> {
+        if (index < 0 || index >= this.TOTAL_NODES) throw new Error('Índice de nó inválido.');
+        if (!this.nodeStatus[index].healthy) throw new Error('O nó já está offline.');
+
+        console.warn(`[CHAOS MONKEY] A abater o Nó ${index + 1}...`);
+        this.nodeStatus[index].healthy = false;
+        this.nodeStatus[index].lastError = 'ABATIDO INTENCIONALMENTE (CHAOS MONKEY)';
+
+        // Close mongoose connection
+        if (this.connections[index]) {
+            await this.connections[index].close();
+        }
+
+        // Stop memory server if local
+        if (this.memoryServers[index]) {
+            await this.memoryServers[index].stop();
+        }
+        
+        console.warn(`[CHAOS MONKEY] Nó ${index + 1} destruído com sucesso.`);
+    }
+
+    async reviveNode(index: number): Promise<void> {
+        if (index < 0 || index >= this.TOTAL_NODES) throw new Error('Índice de nó inválido.');
+        if (this.nodeStatus[index].healthy) throw new Error('O nó já está online.');
+
+        console.warn(`[CHAOS MONKEY] A ressuscitar o Nó ${index + 1}...`);
+        
+        try {
+            if (process.env.LOCAL_DEV === 'true') {
+                const nodeName = `audit_node_${index + 1}`;
+                const dbDir = require('path').join(process.cwd(), '.db', nodeName);
+                const requireFn = new Function('require', 'return require')(require);
+                const MongoMemoryServer = requireFn('mongodb-memory-server').MongoMemoryServer;
+                
+                const server = await MongoMemoryServer.create({ instance: { dbPath: dbDir } });
+                const uri = server.getUri();
+                this.memoryServers[index] = server;
+
+                const conn = await mongoose.createConnection(uri).asPromise();
+                const model = conn.model<IAuditEntry>('AuditEntry', AuditEntrySchema);
+
+                this.connections[index] = conn;
+                this.models[index] = model;
+                this.nodeStatus[index] = { name: nodeName, uri, healthy: true, lastError: null };
+            } else {
+                // Em produção, tenta ligar novamente à URI existente
+                const uri = this.nodeStatus[index].uri;
+                if (!uri || uri === 'N/A') throw new Error('Sem URI para o nó de produção.');
+                
+                const conn = await mongoose.createConnection(uri, {
+                    serverSelectionTimeoutMS: 5000,
+                    connectTimeoutMS: 5000,
+                }).asPromise();
+                const model = conn.model<IAuditEntry>('AuditEntry', AuditEntrySchema);
+                
+                this.connections[index] = conn;
+                this.models[index] = model;
+                this.nodeStatus[index].healthy = true;
+                this.nodeStatus[index].lastError = null;
+            }
+            console.warn(`[CHAOS MONKEY] Nó ${index + 1} restaurado com sucesso.`);
+        } catch (err: any) {
+            console.error(`[CHAOS MONKEY] Erro ao restaurar Nó ${index + 1}: ${err.message}`);
+            this.nodeStatus[index].lastError = err.message;
+            throw err;
+        }
     }
 }
 

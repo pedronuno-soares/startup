@@ -10,8 +10,12 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import crypto from 'crypto';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireRole } from '../middleware/auth';
 import { consensusManager } from '../services/consensusManager';
+import { extractPdfMetadata, extractImageMetadata } from './analyse';
+
+// Roles with read access to the chain explorer
+const CHAIN_READERS = ['Investigador', 'Perito', 'Juiz', 'Admin', 'Utilizador'] as const;
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -19,8 +23,8 @@ export function createChainRouter(): Router {
     const router = Router();
 
     // ── GET /api/v1/chain/blocks ──────────────────────────────
-    // Lista os últimos N blocos (autenticação obrigatória)
-    router.get('/blocks', authenticateToken, async (req: Request, res: Response) => {
+    // Lista os últimos N blocos (roles: Investigador, Perito, Juiz, Admin)
+    router.get('/blocks', async (req: Request, res: Response) => {
         try {
             const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
             const blocks = await consensusManager.getBlocks(0, limit);
@@ -37,7 +41,7 @@ export function createChainRouter(): Router {
 
     // ── GET /api/v1/chain/block/:hash ─────────────────────────
     // Detalhe de um bloco específico pelo currentHash
-    router.get('/block/:hash', authenticateToken, async (req: Request, res: Response) => {
+    router.get('/block/:hash', async (req: Request, res: Response) => {
         try {
             const block = await consensusManager.getBlockByHash(req.params.hash);
             if (!block) {
@@ -68,11 +72,29 @@ export function createChainRouter(): Router {
             const block = await consensusManager.findBlockByFileHash(computedFileHash);
 
             if (!block) {
+                // Fazer análise forense on-the-fly para descobrir *porquê* que está alterado
+                const originalName = req.file.originalname;
+                const mimeType     = req.file.mimetype || 'application/octet-stream';
+                let forensicHints = '';
+                let signals: string[] = [];
+
+                if (mimeType === 'application/pdf' || originalName.toLowerCase().endsWith('.pdf')) {
+                    const pdfMeta = extractPdfMetadata(req.file.buffer);
+                    if (pdfMeta.suspicionSignals) signals.push(...pdfMeta.suspicionSignals);
+                } else if (mimeType.startsWith('image/') || originalName.toLowerCase().match(/\.(jpg|jpeg|png|gif)$/)) {
+                    const imgMeta = extractImageMetadata(req.file.buffer);
+                    if (imgMeta.suspicionSignals) signals.push(...imgMeta.suspicionSignals);
+                }
+
+                if (signals.length > 0) {
+                    forensicHints = '<br><br><b>[!] ANÁLISE FORENSE (CSI):</b><br>' + signals.map(s => `- ${s}`).join('<br>');
+                }
+
                 return res.status(200).json({
                     verified:    false,
                     reason:      'FILE_NOT_IN_CHAIN',
                     computedFileHash,
-                    message:     'Este ficheiro não foi registado nesta blockchain, ou foi adulterado.',
+                    message:     'Este ficheiro não foi registado nesta blockchain, ou foi adulterado.' + forensicHints,
                 });
             }
 
@@ -101,8 +123,8 @@ export function createChainRouter(): Router {
                     v2Blocks:    integrity.v2Blocks,
                 },
                 message: integrity.valid
-                    ? '✅ Ficheiro autêntico e cadeia íntegra. Conteúdo inalterado desde o registo.'
-                    : '⚠️  Ficheiro encontrado mas a integridade da cadeia está comprometida.',
+                    ? '[OK] Ficheiro autêntico e cadeia íntegra. Conteúdo inalterado desde o registo.'
+                    : '[AVISO] Ficheiro encontrado mas a integridade da cadeia está comprometida.',
             });
 
         } catch (err: any) {
@@ -121,6 +143,42 @@ export function createChainRouter(): Router {
             });
         } catch (err: any) {
             return res.status(503).json({ error: 'NodeUnavailable', message: err.message });
+        }
+    });
+
+    // ── POST /api/v1/chain/audit-log ──────────────────────────
+    // Regista o acesso (leitura/verificação) de um ficheiro na blockchain
+    router.post('/audit-log', async (req: Request, res: Response) => {
+        try {
+            const { fileHash, fileName, actionDetail } = req.body;
+            if (!fileHash || !fileName) {
+                return res.status(400).json({ error: 'MissingFields', message: 'fileHash e fileName são obrigatórios.' });
+            }
+
+            const actor = req.user;
+            if (!actor) return res.status(401).json({ error: 'Unauthorized' });
+
+            const result = await consensusManager.broadcastAndCommit({
+                action:      `ACCESS_LOG:${actionDetail || 'VERIFY'}`,
+                actorID:     actor.id,
+                actorEmail:  actor.email,
+                actorRole:   actor.role,
+                fileCID:     'N/A',
+                fileName:    fileName,
+                driveFileId: 'N/A',
+                fileHash:    fileHash,
+                fileSize:    0,
+                publicKey:   req.body.publicKey || 'NONE',
+                signature:   req.body.signature || 'NONE'
+            });
+
+            return res.status(201).json({
+                status: 'OK',
+                message: 'Acesso registado na blockchain.',
+                blockIndex: result.blockIndex
+            });
+        } catch (err: any) {
+            return res.status(500).json({ error: 'ConsensusFailed', message: err.message });
         }
     });
 

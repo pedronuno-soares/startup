@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incorrupt — Authentication</title>
+<link rel="stylesheet" href="/public/theme.css">
+<style>
+body { align-items: center; justify-content: center; padding: 24px; }
+.wrap { width: 100%; max-width: 400px; }
+.brand { text-align: center; margin-bottom: 32px; }
+.brand-sub { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+.tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+.tab { flex: 1; background: transparent; border: 1px solid transparent; color: var(--muted); font-family: inherit; font-weight: 600; font-size: 13px; padding: 10px; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+.tab.active { background: var(--sur2); border: 1px solid var(--brd); color: var(--txt); }
+.panel-login { display: none; }
+.panel-login.active { display: block; animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none} }
+.pwd-toggle { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--muted); cursor: pointer; }
+.info-row { display: flex; align-items: center; justify-content: space-between; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--brd); font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="brand">
+    <div class="logo" style="margin: 0 auto 16px;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+    <div style="font-size: 24px; font-weight: 700; margin-bottom: 4px;">Incorrupt</div>
+    <div class="brand-sub">BFT Consensus Network</div>
+  </div>
+
+  <div class="panel spotlight" style="padding: 32px">
+    <div class="tabs">
+      <button class="tab active" id="tabLogin" onclick="switchMode('login')">Entrar</button>
+      <button class="tab" id="tabReg" onclick="switchMode('register')">Criar Conta</button>
+    </div>
+
+    <!-- LOGIN -->
+    <div class="panel-login active" id="panelLogin">
+      <label>Endereço de Email</label>
+      <input type="email" id="loginEmail" placeholder="user@domain.com" style="margin-bottom:20px">
+      <label>Password</label>
+      <div style="position:relative; margin-bottom:20px">
+        <input type="password" id="loginPassword" placeholder="••••••••">
+      </div>
+      <button class="btn" id="btnLogin" onclick="doLogin()">Aceder ao Sistema</button>
+    </div>
+
+    <!-- REGISTER -->
+    <div class="panel-login" id="panelRegister">
+      <label>Nome Completo</label>
+      <input type="text" id="regName" placeholder="John Doe" style="margin-bottom:16px">
+      <label>Endereço de Email</label>
+      <input type="email" id="regEmail" placeholder="user@domain.com" style="margin-bottom:16px">
+      <label>Password</label>
+      <input type="password" id="regPassword" placeholder="Mínimo 8 caracteres" style="margin-bottom:16px">
+      <button class="btn" id="btnReg" onclick="doRegister()">Criar Conta</button>
+    </div>
+
+    <div class="info-row">
+      <div>SYS.CORE // v1.1.0</div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <div class="dot" id="serverBadge" style="background:var(--ok)"></div>
+        <span id="serverStatus">Verificando Nó...</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/public/app.js"></script>
+<script>
+window.onload = () => {
+  if (localStorage.getItem('dems_token')) window.location.href = '/';
+};
+
+function switchMode(mode) {
+  const isLogin = mode === 'login';
+  document.getElementById('panelLogin').classList.toggle('active', isLogin);
+  document.getElementById('panelRegister').classList.toggle('active', !isLogin);
+  document.getElementById('tabLogin').classList.toggle('active', isLogin);
+  document.getElementById('tabReg').classList.toggle('active', !isLogin);
+}
+
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const btn = document.getElementById('btnLogin');
+
+  if (!email || !password) { showToast('Aviso', 'Preencha os dados.', 'error'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> A autenticar...';
+
+  try {
+    const resp = await fetch(`http://localhost:8888/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await resp.json();
+
+    if (resp.ok && data.token) {
+      localStorage.setItem('dems_token', data.token);
+      localStorage.setItem('dems_user', JSON.stringify(data.user || {}));
+      btn.innerHTML = 'A redirecionar...';
+      setTimeout(() => window.location.href = '/', 500);
+    } else {
+      showToast('Erro de Autenticação', data.message || 'Credenciais inválidas.', 'error');
+      btn.disabled = false;
+      btn.innerHTML = 'Aceder ao Sistema';
+    }
+  } catch(e) {
+    showToast('Erro', 'Servidor inacessível.', 'error');
+    btn.disabled = false;
+    btn.innerHTML = 'Aceder ao Sistema';
+  }
+}
+
+async function doRegister() {
+  const name = document.getElementById('regName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const btn = document.getElementById('btnReg');
+
+  if (!name || !email || !password) { showToast('Aviso', 'Preencha todos os dados.', 'error'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> A criar conta...';
+
+  try {
+    const resp = await fetch(`http://localhost:8888/api/v1/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password }),
+    });
+    const data = await resp.json();
+
+    if (resp.ok && data.token) {
+      localStorage.setItem('dems_token', data.token);
+      localStorage.setItem('dems_user', JSON.stringify(data.user || {}));
+      btn.innerHTML = 'A redirecionar...';
+      setTimeout(() => window.location.href = '/', 500);
+    } else {
+      showToast('Erro de Registo', data.message || 'Não foi possível criar a conta.', 'error');
+      btn.disabled = false;
+      btn.innerHTML = 'Criar Conta';
+    }
+  } catch(e) {
+    showToast('Erro', 'Servidor inacessível.', 'error');
+    btn.disabled = false;
+    btn.innerHTML = 'Criar Conta';
+  }
+}
+</script>
+</body>
+</html>

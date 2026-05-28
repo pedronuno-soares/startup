@@ -1,29 +1,7 @@
-# ── Dependencies ─────────────────────────────────────────────
 node_modules/
-.npm
-
-# ── Build output ──────────────────────────────────────────────
-dist/
-build/
-
-# ── Environment & secrets ─────────────────────────────────────
+orchestrator/node_modules/
+orchestrator/dist/
+orchestrator/.db/
 .env
-.env.local
-.env.*.local
-google-key.json
-
-# ── Logs ──────────────────────────────────────────────────────
-*.log
-npm-debug.log*
-logs/
-
-# ── OS files ──────────────────────────────────────────────────
 .DS_Store
-Thumbs.db
-
-# ── Editor ────────────────────────────────────────────────────
-.vscode/
-.idea/
-
-# ── MongoDB memory server cache ───────────────────────────────
-.cache/
+*.log

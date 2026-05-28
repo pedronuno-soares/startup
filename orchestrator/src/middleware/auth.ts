@@ -22,7 +22,7 @@ declare global {
     }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dems_jwt_secret_dev_only_change_in_production';
+const JWT_SECRET = process.env.JWT_SECRET || 'dems_local_dev_secret';
 
 // ── Middleware ─────────────────────────────────────────────────
 export function authenticateToken(req: Request, res: Response, next: NextFunction): void {

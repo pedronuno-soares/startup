@@ -9,6 +9,7 @@
 // ============================================================
 
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { consensusManager } from '../services/consensusManager';
 
 // DocuSign system account — a virtual actor for webhook events
@@ -34,7 +35,7 @@ export function createDocuSignRouter(): Router {
                 ?? payload?.EnvelopeId
             ) as string | undefined;
 
-            console.log(`📬 [DocuSign] Webhook received — event: ${event}, envelope: ${envelopeId}`);
+            console.log(`[DocuSign] Webhook recebido - Evento: ${event}, envelope: ${envelopeId}`);
 
             if (!envelopeId) {
                 return res.status(400).json({
@@ -65,19 +66,29 @@ export function createDocuSignRouter(): Router {
                 ?.find((f: any) => f.name === 'DEMS_IPFS_CID')?.value
                 ?? `docusign:${envelopeId}`;
 
+            // Generate a synthetic fileHash from the envelopeId so the
+            // blockchain v2 block is well-formed (no raw file bytes available
+            // for DocuSign events — the envelope ID is the canonical identifier).
+            const syntheticFileHash = crypto
+                .createHash('sha256')
+                .update(`docusign:envelope:${envelopeId}`, 'utf8')
+                .digest('hex');
+
             const result = await consensusManager.broadcastAndCommit({
-                action:     'EVIDENCE_SIGNED',
-                actorID:    DOCUSIGN_ACTOR_ID,
-                actorEmail: firstSigner?.email ?? DOCUSIGN_ACTOR_EMAIL,
-                actorRole:  DOCUSIGN_ACTOR_ROLE,
-                fileCID:    customFileCID,
-                envelopeID: envelopeId,
-                fileName:   `envelope_${envelopeId}`,
+                action:      'EVIDENCE_SIGNED',
+                actorID:     DOCUSIGN_ACTOR_ID,
+                actorEmail:  firstSigner?.email ?? DOCUSIGN_ACTOR_EMAIL,
+                actorRole:   DOCUSIGN_ACTOR_ROLE,
+                fileCID:     customFileCID,
+                envelopeID:  envelopeId,
+                fileName:    `envelope_${envelopeId}`,
                 driveFileId: 'N/A',
+                fileHash:    syntheticFileHash,  // SHA-256 of envelopeId — no file bytes
+                fileSize:    0,                  // no physical file in DocuSign webhooks
             });
 
             console.log(
-                `⛓️  [DocuSign] Chain entry committed — ` +
+                `[DocuSign] Chain entry committed — ` +
                 `envelope: ${envelopeId} | consensus: ${result.consensusCount}/3`
             );
 
@@ -89,7 +100,7 @@ export function createDocuSignRouter(): Router {
             });
 
         } catch (err: any) {
-            console.error(`❌ [DocuSign] Webhook processing error: ${err.message}`);
+            console.error(`[ERRO DocuSign] Webhook processing error: ${err.message}`);
             // Return 200 to DocuSign to prevent retry storm — log internally
             return res.status(200).json({
                 status:  'INTERNAL_ERROR',

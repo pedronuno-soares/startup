@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incorrupt — Upload de Prova</title>
+<link rel="stylesheet" href="/public/theme.css">
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-inner">
+      <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <h1>Incorrupt</h1>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Modo Claro/Escuro">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+    </button>
+  </div>
+
+  <div class="nav-lbl">Dashboard</div>
+  <div class="nav">
+    <a href="/" class="nav-btn active"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Upload</a>
+    <a href="/explorer" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg> Blockchain</a>
+  </div>
+
+  <div class="nav-lbl">Forense</div>
+  <div class="nav">
+    <a href="/verify" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Verificar Prova</a>
+    <a href="/analyse" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Análise Prévia</a>
+    <a href="/custody" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M15 14l-3 3-3-3"/><path d="M12 17V9"/></svg> Gestão de Custódia</a>
+    <a href="/terminal" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> Terminal OS</a>
+    <a href="/chaos" class="nav-btn" style="color:#ff4444;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Simulador de Ataque</a>
+  </div>
+
+  <div class="sb-footer spotlight">
+    <div class="user-badge" id="userBadge" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> <span id="userBadgeText"></span></div>
+    <div class="badge off" id="serverBadge"><div class="dot"></div> <span id="serverStatus">A carregar...</span></div>
+    <button class="btn-logout" onclick="doLogout()">Terminar Sessão</button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <h2>Upload de Prova Digital</h2>
+    <div class="bft-tag">BFT CONSENSUS ACTIVE</div>
+  </div>
+
+  <div class="scroll-area">
+    <div class="stats" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+      <div class="panel spotlight" style="margin:0; padding:24px"><div style="font-size:12px;color:var(--muted); font-family:'Orbitron', sans-serif">NODES ACTIVOS</div><div id="statNodes" style="font-size:32px;font-weight:700;color:var(--ok); font-family:'Rajdhani', sans-serif; text-shadow: 0 0 10px var(--ok)">—</div></div>
+      <div class="panel spotlight" style="margin:0; padding:24px"><div style="font-size:12px;color:var(--muted); font-family:'Orbitron', sans-serif">QUÓRUM BFT</div><div id="statQuorum" style="font-size:32px;font-weight:700;color:var(--acc); font-family:'Rajdhani', sans-serif; text-shadow: 0 0 10px var(--acc)">—</div></div>
+      <div class="panel spotlight" style="margin:0; padding:24px"><div style="font-size:12px;color:var(--muted); font-family:'Orbitron', sans-serif">AMBIENTE</div><div id="statMode" style="font-size:32px;font-weight:700; font-family:'Rajdhani', sans-serif">—</div></div>
+    </div>
+
+    <div class="nodes" id="nodesGrid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px;">
+      <!-- Skeletons before load -->
+      <div class="skeleton" style="height: 70px;"></div>
+      <div class="skeleton" style="height: 70px;"></div>
+      <div class="skeleton" style="height: 70px;"></div>
+    </div>
+
+
+    <div class="panel spotlight">
+      <div class="panel-hdr"><span>TRANSMISSÃO SEGURA DE EVIDÊNCIA</span></div>
+      <div class="panel-body grid-2">
+        <div>
+          <label>CÓDIGO FONTE / DOCUMENTO A PROTEGER</label>
+          <input type="file" id="evidenceFile" style="cursor:pointer; padding: 12px; border: 1px dashed var(--brd-hov);">
+          <button class="btn" id="btnUpload" onclick="doUpload()" style="margin-top:24px;">INICIAR SEQUÊNCIA DE REGISTO BFT</button>
+        </div>
+        <div id="uploadResponse" style="background:#000; border:1px solid var(--acc); border-radius:4px; padding:16px; font-family:'JetBrains Mono', monospace; font-size:12px; color:var(--acc); white-space:pre-wrap; box-shadow: inset 0 0 10px rgba(0,255,255,0.1)">> STANDBY. A aguardar ficheiro...</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="/public/app.js"></script>
+<script>
+async function doUpload() {
+  const file = document.getElementById('evidenceFile').files[0];
+  const box = document.getElementById('uploadResponse');
+  const btn = document.getElementById('btnUpload');
+  
+  if(!file) {
+    showToast('Atenção', 'Selecione um ficheiro primeiro.', 'error');
+    return;
+  }
+  
+  btn.innerHTML = '<span class="spin"></span> A enviar...'; 
+  btn.disabled = true;
+  box.textContent = `> Processando "${file.name}"...\n> Calculando Hash SHA-256 localmente...`;
+  
+  try {
+    // 1. Calculate Hash locally for signing
+    const arrayBuffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const fileHashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    box.textContent += `\n> Hash gerado: ${fileHashHex}\n> Assinando com Chave Privada ECDSA...`;
+    
+    // 2. Sign the Hash
+    let signature = 'NONE';
+    let publicKey = 'NONE';
+    try {
+        signature = await signData(fileHashHex);
+        publicKey = await getPublicKeyHex();
+        box.textContent += `\n> Assinatura ECDSA: ${signature.substring(0,32)}...`;
+    } catch (e) {
+        box.textContent += `\n> [AVISO] Falha ao assinar. Modo sem Não-Repúdio.`;
+    }
+
+    box.textContent += `\n> A aguardar Consenso BFT...`;
+
+    // 3. Send to server
+    const form = new FormData(); 
+    form.append('evidence_file', file);
+    form.append('signature', signature);
+    form.append('publicKey', publicKey);
+    
+    const authToken = localStorage.getItem('dems_token');
+    const r = await fetch('http://localhost:8888/api/v1/evidence/upload', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer '+authToken},
+      body: form
+    });
+    const d = await r.json();
+    
+    if(r.ok) {
+      box.style.color = 'var(--ok)';
+      box.style.borderColor = 'var(--ok)';
+      box.textContent = `> [TRANSMISSÃO CONCLUÍDA]\n> Ficheiro: ${file.name}\n> SHA-256: ${d.fileHash}\n> Bloco #${d.blockIndex || '?'} adicionado à cadeia de custódia.`;
+      showToast('Sucesso Operacional', 'Ficheiro gravado na Blockchain.', 'success');
+    } else {
+      box.style.color = 'var(--err)';
+      box.style.borderColor = 'var(--err)';
+      box.textContent = `> [FALHA DE TRANSMISSÃO]\n> ${d.message}`;
+      showToast('Erro Crítico', d.message, 'error');
+    }
+  } catch(e) {
+    box.style.color = 'var(--err)';
+    box.style.borderColor = 'var(--err)';
+    box.textContent = '> [ERRO SISTEMA] ' + e.message;
+    showToast('Erro Sistema', e.message, 'error');
+  } finally {
+    btn.innerHTML = 'INICIAR SEQUÊNCIA DE REGISTO BFT'; 
+    btn.disabled = false;
+  }
+}
+
+</script>
+</body>
+</html>

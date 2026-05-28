@@ -15,8 +15,10 @@ import stream from 'stream';
 import { google } from 'googleapis';
 import fs from 'fs';
 import path from 'path';
-import { authenticateToken, requireRole } from '../middleware/auth';
+import exifr from 'exifr';
+import { authenticateToken } from '../middleware/auth';
 import { consensusManager } from '../services/consensusManager';
+import { demsEvents } from '../server';
 
 // ── Google Drive setup (optional — fail gracefully) ───────────
 let drive: ReturnType<typeof google.drive> | null = null;
@@ -28,12 +30,12 @@ if (fs.existsSync(KEY_FILE)) {
             scopes: ['https://www.googleapis.com/auth/drive'],
         });
         drive = google.drive({ version: 'v3', auth });
-        console.log('✅ [Drive] Google Drive integration active.');
+        console.log('[OK] [Drive] Google Drive integration active.');
     } catch (e) {
-        console.warn('⚠️  [Drive] Failed to initialise Google Drive. Backup will be skipped.');
+        console.warn('[AVISO] [Drive] Failed to initialise Google Drive. Backup will be skipped.');
     }
 } else {
-    console.warn('⚠️  [Drive] google-key.json not found. Drive backup disabled.');
+    console.warn('[AVISO] [Drive] google-key.json not found. Drive backup disabled.');
 }
 
 // ── Multer (in-memory storage) ────────────────────────────────
@@ -47,7 +49,7 @@ function getEncryptionKey(): Buffer {
         return Buffer.from(envKey, 'hex');
     }
     // Fallback for dev: derive from passphrase — NOT for production
-    console.warn('⚠️  [AES] ENCRYPTION_KEY not set — using derived key (DEV ONLY)');
+    console.warn('[AVISO] [AES] ENCRYPTION_KEY not set — using derived key (DEV ONLY)');
     return crypto.scryptSync('dems_default_dev_key', 'dems_salt_v1', 32);
 }
 
@@ -55,23 +57,22 @@ export function createEvidenceRouter(): Router {
     const router = Router();
 
     // ── POST /api/v1/evidence/upload ─────────────────────────
-    // Auth required: Investigador or Perito
+    // Auth required: qualquer utilizador autenticado (sem restrição de role)
     router.post(
         '/upload',
         authenticateToken,
-        requireRole('Investigador', 'Perito', 'Admin'),
         upload.single('evidence_file'),
         (req: Request, res: Response) => {
             if (!req.file) {
                 return res.status(400).json({ error: 'MissingFile', message: 'evidence_file field is required.' });
             }
-            if (!req.user) {
-                return res.status(401).json({ error: 'Unauthorized' });
-            }
 
             const fileBuffer   = req.file.buffer;
             const originalName = req.file.originalname;
-            const actor        = req.user;
+            
+            // Dummy actor if not authenticated
+            const actor = req.user || { id: 999, email: 'public_user@platform', role: 'Visitante' };
+
             const trackingId   = `trk_${Date.now()}_${actor.id}`;
 
             // ── Compute fileHash SYNCHRONOUSLY before responding ──
@@ -94,7 +95,39 @@ export function createEvidenceRouter(): Router {
             // ── Background processing ─────────────────────────
             setImmediate(async () => {
                 try {
-                    console.log(`\n📥 [DEMS] Processing: ${originalName} — Actor: ${actor.email}`);
+                    console.log(`[DEMS] Processing: ${originalName} — Actor: ${actor.email}`);
+
+                    demsEvents.emit('event', 'upload_started', {
+                        fileName:  originalName,
+                        fileSize,
+                        actor:     actor.email,
+                        trackingId,
+                        ts:        new Date().toISOString(),
+                    });
+
+                    // ── Extração de EXIF ──────────────────────────────
+                    let metadataStr = 'NONE';
+                    try {
+                        const parsedExif = await exifr.parse(fileBuffer);
+                        if (parsedExif) {
+                            const relevantData = {
+                                Make: parsedExif.Make,
+                                Model: parsedExif.Model,
+                                DateTimeOriginal: parsedExif.DateTimeOriginal,
+                                latitude: parsedExif.latitude,
+                                longitude: parsedExif.longitude
+                            };
+                            // Filtra valores nulos/indefinidos
+                            const cleanData = Object.fromEntries(
+                                Object.entries(relevantData).filter(([_, v]) => v != null)
+                            );
+                            if (Object.keys(cleanData).length > 0) {
+                                metadataStr = JSON.stringify(cleanData);
+                            }
+                        }
+                    } catch (exifErr) {
+                        console.warn('[EXIF] Não foi possível extrair metadados EXIF deste ficheiro.');
+                    }
 
                     // ── 1. BFT Consensus Commit (BLOCKCHAIN FIRST) ─────
                     // O commit na blockchain acontece SEMPRE, independentemente
@@ -109,14 +142,26 @@ export function createEvidenceRouter(): Router {
                         driveFileId: 'OFFLINE',
                         fileHash,   // SHA-256 do ficheiro — garante imutabilidade
                         fileSize,
+                        publicKey:  req.body.publicKey || 'NONE',
+                        signature:  req.body.signature || 'NONE',
+                        metadata:   metadataStr
                     });
 
                     console.log(
-                        `⛓️  [BLOCKCHAIN] Block #${result.blockIndex} committed` +
+                        `[BLOCKCHAIN] Block #${result.blockIndex} committed` +
                         ` | hash: ${result.currentHash.substring(0, 16)}...` +
-                        ` | fileHash: ${result.fileHash.substring(0, 16)}...` +
                         ` | consensus: ${result.consensusCount}/3`
                     );
+
+                    demsEvents.emit('event', 'block_added', {
+                        blockIndex:    result.blockIndex,
+                        fileName:      originalName,
+                        fileHash:      fileHash.substring(0, 16) + '...',
+                        blockHash:     result.currentHash.substring(0, 16) + '...',
+                        actor:         actor.email,
+                        consensusCount: result.consensusCount,
+                        ts:            new Date().toISOString(),
+                    });
 
                     // ── 2. IPFS (Pinata) — opcional, não bloqueia a chain ──
                     let fileCID = 'CID_OFFLINE';
@@ -134,9 +179,9 @@ export function createEvidenceRouter(): Router {
                             { headers: { ...formData.getHeaders(), Authorization: `Bearer ${pinataToken}` } }
                         );
                         fileCID = pinataRes.data.IpfsHash;
-                        console.log(`✅ [IPFS] CID: ${fileCID}`);
+                        console.log(`[OK] [IPFS] CID: ${fileCID}`);
                     } catch (ipfsErr: any) {
-                        console.warn(`⚠️  [IPFS] Upload falhou (não fatal): ${ipfsErr.message}`);
+                        console.warn(`[AVISO] [IPFS] Upload falhou (não fatal): ${ipfsErr.message}`);
                     }
 
                     // ── 3. AES-256 + Google Drive — opcional ──────────────
@@ -146,7 +191,7 @@ export function createEvidenceRouter(): Router {
                         const cipher          = crypto.createCipheriv('aes-256-cbc', encryptionKey, iv);
                         const ciphertext      = Buffer.concat([cipher.update(fileBuffer), cipher.final()]);
                         const encryptedBuffer = Buffer.concat([iv, ciphertext]);
-                        console.log(`🔒 [AES-256] Encrypted (${encryptedBuffer.length} bytes).`);
+                        console.log(`[AES-256] Encrypted (${encryptedBuffer.length} bytes).`);
 
                         if (drive) {
                             const bodyStream = new stream.PassThrough();
@@ -159,14 +204,14 @@ export function createEvidenceRouter(): Router {
                                 },
                                 media: { mimeType: 'application/octet-stream', body: bodyStream },
                             } as any);
-                            console.log(`✅ [Drive] Backup ID: ${driveRes.data.id}`);
+                            console.log(`[OK] [Drive] Backup ID: ${driveRes.data.id}`);
                         }
                     } catch (encErr: any) {
-                        console.warn(`⚠️  [AES/Drive] Falhou (não fatal): ${encErr.message}`);
+                        console.warn(`[AVISO] [AES/Drive] Falhou (não fatal): ${encErr.message}`);
                     }
 
                 } catch (err: any) {
-                    console.error(`❌ [DEMS] Processing failed for ${trackingId}:`);
+                    console.error(`[ERRO DEMS] Processing failed for ${trackingId}:`);
                     if (err.response) {
                         console.error(`  HTTP ${err.response.status}:`, JSON.stringify(err.response.data));
                     } else {
@@ -201,6 +246,78 @@ export function createEvidenceRouter(): Router {
                     integrity,
                     readFrom: nodeHealth[healthyIdx].name,
                     message: 'Use GET /api/v1/health for live node status.',
+                });
+            } catch (err: any) {
+                return res.status(500).json({ error: 'InternalServerError', message: err.message });
+            }
+        }
+    );
+
+    // ── POST /api/v1/evidence/transfer ────────────────────────
+    // Allows transferring custody of an evidence file
+    router.post(
+        '/transfer',
+        authenticateToken,
+        async (req: Request, res: Response) => {
+            try {
+                const { fileHash, toEmail } = req.body;
+                if (!fileHash || !toEmail) {
+                    return res.status(400).json({ error: 'BadRequest', message: 'fileHash and toEmail are required' });
+                }
+
+                const actor = req.user;
+                if (!actor) {
+                    return res.status(401).json({ error: 'Unauthorized', message: 'Missing user context' });
+                }
+
+                // Get original block data to copy fileName and size
+                const block = await consensusManager.getBlockByHash(fileHash);
+                if (!block) {
+                    // Try to find ANY block that refers to this fileHash
+                    // We might need to search all blocks. For now, assume fileHash exists.
+                }
+
+                // We will rely on the UI to send the fileName and fileSize if we want, or we can fetch them.
+                // Let's just do a generic search using getBlocks if getBlockByHash fails (since fileHash might not be the block hash)
+                const allBlocks = await consensusManager.getBlocks(0, 1000);
+                const originalBlock = allBlocks.find(b => b.fileHash === fileHash && b.action === 'EVIDENCE_UPLOAD');
+
+                if (!originalBlock) {
+                    return res.status(404).json({ error: 'NotFound', message: 'Original evidence not found in blockchain' });
+                }
+
+                const metadataStr = JSON.stringify({ from: actor.email, to: toEmail });
+
+                const result = await consensusManager.broadcastAndCommit({
+                    action:     'CUSTODY_TRANSFER',
+                    actorID:    actor.id,
+                    actorEmail: actor.email,
+                    actorRole:  actor.role,
+                    fileCID:    originalBlock.fileCID,
+                    fileName:   originalBlock.fileName,
+                    driveFileId: 'OFFLINE',
+                    fileHash:   fileHash,
+                    fileSize:   originalBlock.fileSize,
+                    publicKey:  req.body.publicKey || 'NONE',
+                    signature:  req.body.signature || 'NONE',
+                    metadata:   metadataStr
+                });
+
+                demsEvents.emit('event', 'block_added', {
+                    blockIndex:    result.blockIndex,
+                    fileName:      originalBlock.fileName,
+                    fileHash:      fileHash.substring(0, 16) + '...',
+                    blockHash:     result.currentHash.substring(0, 16) + '...',
+                    actor:         actor.email,
+                    consensusCount: result.consensusCount,
+                    ts:            new Date().toISOString(),
+                    action:        'CUSTODY_TRANSFER'
+                });
+
+                return res.status(200).json({
+                    status: 'OK',
+                    message: `Custody transferred to ${toEmail}`,
+                    block: result
                 });
             } catch (err: any) {
                 return res.status(500).json({ error: 'InternalServerError', message: err.message });

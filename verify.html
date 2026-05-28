@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incorrupt — Auditoria de Imutabilidade</title>
+<link rel="stylesheet" href="/public/theme.css">
+<style>
+.drop-zone { border: 1px dashed var(--brd-hov); border-radius: 4px; padding: 60px; text-align: center; cursor: pointer; transition: 0.3s; position: relative; background: rgba(0, 255, 255, 0.02); overflow: hidden; }
+.drop-zone:hover { border-color: var(--acc); background: rgba(0, 255, 255, 0.05); box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.1); }
+.drop-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 10; }
+
+.proof-card { background: rgba(0,0,0,0.6); border: 1px solid var(--brd); border-radius: 4px; padding: 24px; margin-top: 24px; display: none; backdrop-filter: blur(10px); }
+.proof-card.ok { border-color: var(--ok); box-shadow: 0 0 15px rgba(0, 255, 170, 0.2); }
+.proof-card.fail { border-color: var(--err); box-shadow: 0 0 25px rgba(255, 0, 60, 0.4); animation: pulse-err 1.5s infinite; }
+@keyframes pulse-err { 0% { box-shadow: 0 0 25px rgba(255, 0, 60, 0.4); } 50% { box-shadow: 0 0 40px rgba(255, 0, 60, 0.8); border-color: #ff5555; } 100% { box-shadow: 0 0 25px rgba(255, 0, 60, 0.4); } }
+
+.proof-row { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px dashed var(--brd); font-size: 13px; }
+.proof-row:last-child { border-bottom: none; }
+.proof-row .k { color: var(--muted); text-transform: uppercase; font-family: 'Orbitron', sans-serif; letter-spacing: 1px; }
+.proof-row .v { font-family: 'JetBrains Mono', monospace; color: var(--txt); }
+
+.bft-nodes { display: flex; gap: 16px; margin-bottom: 24px; justify-content: center; }
+.bft-node { width: 50px; height: 50px; border-radius: 50%; border: 2px solid var(--brd); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 10px; font-family: 'Orbitron', sans-serif; background: var(--bg); transition: 0.3s; position: relative; }
+.bft-node.active { border-color: var(--ok); color: var(--ok); background: rgba(0, 255, 170, 0.1); box-shadow: 0 0 15px rgba(0, 255, 170, 0.4); }
+.bft-node::after { content: ''; position: absolute; width: 100%; height: 100%; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--ok); animation: spin 1s linear infinite; display: none; }
+.bft-node.syncing::after { display: block; }
+
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-inner">
+      <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <h1>Incorrupt</h1>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+  </div>
+  <div class="nav-lbl">Dashboard</div>
+  <div class="nav">
+    <a href="/" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Upload</a>
+    <a href="/explorer" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg> Blockchain</a>
+  </div>
+  <div class="nav-lbl">Forense</div>
+  <div class="nav">
+    <a href="/verify" class="nav-btn active"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Verificar Prova</a>
+    <a href="/analyse" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Análise Prévia</a>
+    <a href="/custody" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M15 14l-3 3-3-3"/><path d="M12 17V9"/></svg> Gestão de Custódia</a>
+    <a href="/terminal" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> Terminal OS</a>
+    <a href="/chaos" class="nav-btn" style="color:#ff4444;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Simulador de Ataque</a>
+  </div>
+  <div class="sb-footer spotlight">
+    <div class="user-badge" id="userBadge" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> <span id="userBadgeText"></span></div>
+    <div class="badge off" id="serverBadge"><div class="dot"></div> <span id="serverStatus">A carregar...</span></div>
+    <button class="btn-logout" onclick="doLogout()">Terminar Sessão</button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <h2>Auditoria de Imutabilidade</h2>
+    <div class="bft-tag">BFT CONSENSUS ACTIVE</div>
+  </div>
+
+    <div class="scroll-area">
+      <div class="panel spotlight">
+        <div class="panel-hdr">VALIDAÇÃO CRIPTOGRÁFICA DE MATRIZ BFT</div>
+        <div class="panel-body">
+          
+          <div class="bft-nodes" id="bftAnimation" style="display:none">
+            <div class="bft-node" id="n1">N1</div>
+            <div class="bft-node" id="n2">N2</div>
+            <div class="bft-node" id="n3">N3</div>
+          </div>
+
+          <div class="drop-zone" id="dropZone">
+            <input type="file" id="verifyFile" onchange="handleVerifyFile(this.files[0])">
+            <svg id="vIcon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="1.5" style="margin-bottom:16px; filter: drop-shadow(0 0 5px var(--acc))"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            <h3 style="font-family:'Orbitron', sans-serif; letter-spacing:1px; color:var(--txt)">INSERIR EVIDÊNCIA PARA VERIFICAÇÃO</h3>
+            <p style="color:var(--muted); font-size:13px; margin-top:8px">O documento não será enviado para a internet. O Hash SHA-256 é calculado localmente e comparado com a Blockchain.</p>
+          </div>
+          
+          <div class="proof-card" id="proofCard">
+            <h3 id="proofTitle" style="margin-bottom: 24px; font-weight:700; font-family:'Orbitron', sans-serif"></h3>
+            <div id="proofRows"></div>
+            <button id="btnExportPDF" class="btn" style="display:none; margin-top:24px; border-color:var(--ok); color:var(--ok)" onclick="exportPDF()">GERAR CERTIFICADO FORENSE (PDF)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/public/app.js"></script>
+<script>
+let lastVerifiedData = null;
+
+async function handleVerifyFile(file) {
+  if(!file) return;
+  const card = document.getElementById('proofCard');
+  const title = document.getElementById('proofTitle');
+  const rows = document.getElementById('proofRows');
+  const pdfBtn = document.getElementById('btnExportPDF');
+  
+  card.style.display = 'none'; 
+  pdfBtn.style.display = 'none';
+  document.getElementById('dropZone').style.display = 'none';
+  
+  const bftAnim = document.getElementById('bftAnimation');
+  bftAnim.style.display = 'flex';
+  const nodes = [document.getElementById('n1'), document.getElementById('n2'), document.getElementById('n3')];
+  
+  // Simulate Syncing
+  nodes.forEach(n => { n.className = 'bft-node syncing'; });
+  
+  const form = new FormData(); form.append('file', file);
+  try {
+    const d = await (await fetch('http://localhost:8888/api/v1/chain/verify-file', {method:'POST', body:form})).json();
+    
+    // Simulate Quorum animation
+    for(let i=0; i<3; i++) {
+        await new Promise(r => setTimeout(r, 400));
+        if(d.verified || i < 1) nodes[i].className = 'bft-node active'; // if failed, maybe 1 node answers
+        else nodes[i].className = 'bft-node';
+    }
+    
+    bftAnim.style.display = 'none';
+    document.getElementById('dropZone').style.display = 'block';
+    card.style.display = 'block'; 
+
+    if(d.verified) {
+      card.className = 'proof-card ok';
+      title.innerHTML = '[ OK ] PROVA AUTÊNTICA (IMUTÁVEL)';
+      title.style.color = 'var(--ok)';
+      title.classList.remove('glitch-text');
+      title.removeAttribute('data-text');
+      const p = d.proof;
+      lastVerifiedData = { file, d };
+      
+      rows.innerHTML = `
+        <div class="proof-row"><span class="k">Ficheiro</span><span class="v">${file.name}</span></div>
+        <div class="proof-row"><span class="k">SHA-256 Calculado</span><span class="v" id="cyberHash"></span></div>
+        <div class="proof-row"><span class="k">Bloco da Rede</span><span class="v">#${p.blockIndex}</span></div>
+        <div class="proof-row"><span class="k">Assinatura Pública</span><span class="v">${p.publicKey || 'N/A'}</span></div>
+        <div class="proof-row"><span class="k">Data de Registo</span><span class="v">${new Date(p.registeredAt).toLocaleString('pt-PT')} (${p.timeSource || 'LOCAL'})</span></div>
+        <div class="proof-row"><span class="k">Consenso BFT</span><span class="v" style="color:var(--ok)">${p.consensusCount}/3 Nodes CONFIRMAM</span></div>
+      `;
+      
+      scrambleText(document.getElementById('cyberHash'), d.computedFileHash, 1500);
+      showToast('Autêntico', 'O ficheiro não foi alterado desde o seu registo.', 'success');
+      
+      pdfBtn.style.display = 'block';
+
+      // Record Audit Trail Action silently
+      const token = localStorage.getItem('dems_token');
+      if (token) {
+          fetch('http://localhost:8888/api/v1/chain/audit-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+              body: JSON.stringify({ fileHash: d.computedFileHash, fileName: file.name, actionDetail: 'VERIFY' })
+          }).catch(console.error);
+      }
+
+    } else {
+      card.className = 'proof-card fail';
+      title.innerHTML = '[ ERRO ] FALHA NA VERIFICAÇÃO (ADULTERADO)';
+      title.style.color = 'var(--err)';
+      title.classList.add('glitch-text');
+      title.setAttribute('data-text', title.textContent);
+
+      rows.innerHTML = `
+        <div class="proof-row"><span class="k">SHA-256 Calculado</span><span class="v" id="cyberHashErr"></span></div>
+        <div class="proof-row"><span class="k">Diagnóstico Crítico</span><span class="v" style="color:var(--err)">${d.reason} - ${d.message}</span></div>
+      `;
+      scrambleText(document.getElementById('cyberHashErr'), d.computedFileHash, 1000);
+      showToast('Corrompido', 'Ficheiro não confere com a Blockchain.', 'error');
+    }
+  } catch(e) {
+    bftAnim.style.display = 'none';
+    document.getElementById('dropZone').style.display = 'block';
+    card.style.display = 'block';
+    card.className = 'proof-card fail';
+    title.textContent = 'ERRO DE LIGAÇÃO: ' + e.message;
+    showToast('Erro Crítico', e.message, 'error');
+  }
+}
+
+function exportPDF() {
+    if (!lastVerifiedData) return;
+    const { file, d } = lastVerifiedData;
+    const p = d.proof;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    doc.setFillColor(3, 3, 5);
+    doc.rect(0, 0, 210, 297, 'F');
+    
+    doc.setTextColor(0, 255, 255);
+    doc.setFont("courier", "bold");
+    doc.setFontSize(22);
+    doc.text("INCORRUPT", 105, 30, { align: "center" });
+    
+    doc.setFontSize(14);
+    doc.setTextColor(255, 255, 255);
+    doc.text("CERTIFICADO FORENSE DE IMUTABILIDADE", 105, 40, { align: "center" });
+    
+    doc.setDrawColor(0, 255, 255);
+    doc.line(20, 45, 190, 45);
+    
+    doc.setFontSize(10);
+    doc.setFont("courier", "normal");
+    
+    let y = 60;
+    const addRow = (label, value) => {
+        doc.setTextColor(100, 116, 139);
+        doc.text(label + ":", 20, y);
+        doc.setTextColor(255, 255, 255);
+        doc.text(String(value).substring(0, 60), 70, y);
+        y += 10;
+    };
+    
+    addRow("ID DO BLOCO", "#" + p.blockIndex);
+    addRow("HASH DO BLOCO", p.blockHash.substring(0, 40) + "...");
+    addRow("DATA DE REGISTO", new Date(p.registeredAt).toISOString() + ` (${p.timeSource || 'LOCAL'})`);
+    addRow("FICHEIRO", p.fileName);
+    addRow("TAMANHO", p.fileSize + " bytes");
+    y += 5;
+    addRow("SHA-256 (PROVA)", d.computedFileHash);
+    y += 5;
+    addRow("AUTOR", p.registeredBy + ` (${p.actorRole})`);
+    addRow("CHAVE PUBLICA", (p.publicKey && p.publicKey.length > 10) ? p.publicKey.substring(0, 40) + "..." : "N/A");
+    addRow("CONSENSO BFT", p.consensusCount + " Nós Confirmaram");
+    
+    doc.setDrawColor(0, 255, 170);
+    doc.setFillColor(0, 255, 170, 0.1);
+    doc.rect(20, y+10, 170, 30, 'FD');
+    doc.setTextColor(0, 255, 170);
+    doc.setFont("courier", "bold");
+    doc.text("A integridade criptografica deste documento foi verificada e", 105, y+22, { align: "center" });
+    doc.text("encontra-se matematicamente inalterada desde o seu registo original.", 105, y+30, { align: "center" });
+    
+    doc.save(`certificado_forense_${p.blockIndex}_${file.name}.pdf`);
+}
+</script>
+</body>
+</html>

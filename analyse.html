@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incorrupt — Análise Pré-Submissão</title>
+<link rel="stylesheet" href="/public/theme.css">
+<!-- Chart.js for Entropy visualization -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+.analyse-drop { border: 1px dashed var(--brd-hov); border-radius: 4px; padding: 60px; text-align: center; cursor: pointer; background: rgba(0, 255, 255, 0.02); position: relative; transition: 0.3s; overflow: hidden; }
+.analyse-drop:hover { border-color: var(--acc); background: rgba(0, 255, 255, 0.05); box-shadow: inset 0 0 20px rgba(0, 255, 255, 0.1); }
+.analyse-drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; z-index: 10; }
+.scanning-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 2px; background: var(--acc); box-shadow: 0 0 10px var(--acc); animation: scan 2s linear infinite; display: none; }
+@keyframes scan { 0% { top: 0; } 50% { top: 100%; } 100% { top: 0; } }
+
+.verdict-banner { border-radius: 4px; padding: 24px; margin-bottom: 24px; display: flex; align-items: flex-start; gap: 16px; border: 1px solid var(--brd); background: rgba(0,0,0,0.5); backdrop-filter: blur(10px); }
+.verdict-banner.ok { border-color: var(--ok); box-shadow: 0 0 15px rgba(0, 255, 170, 0.2); }
+.verdict-banner.warn { border-color: var(--warn); }
+.verdict-banner.err { border-color: var(--err); box-shadow: 0 0 25px rgba(255, 0, 60, 0.4); animation: pulse-err 1.5s infinite; }
+@keyframes pulse-err { 0% { box-shadow: 0 0 25px rgba(255, 0, 60, 0.4); } 50% { box-shadow: 0 0 40px rgba(255, 0, 60, 0.8); border-color: #ff5555; } 100% { box-shadow: 0 0 25px rgba(255, 0, 60, 0.4); } }
+
+.a-card { background: rgba(0,0,0,0.6); border: 1px solid var(--brd); border-radius: 4px; margin-bottom: 24px; }
+.a-card-hdr { padding: 12px 20px; border-bottom: 1px dashed var(--brd); font-size: 13px; font-weight: 700; color: var(--acc); text-transform: uppercase; font-family: 'Orbitron', sans-serif; letter-spacing: 1px; }
+.a-card-body { padding: 20px; }
+.a-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed var(--brd); font-size: 13px; }
+.a-row:last-child { border-bottom: none; }
+.a-row .k { color: var(--muted); text-transform: uppercase; }
+.a-row .v { font-family: 'JetBrains Mono', monospace; color: var(--txt); }
+
+.hex-dump { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted); background: #000; padding: 12px; border: 1px solid var(--brd); border-radius: 4px; max-height: 150px; overflow-y: hidden; position: relative; margin-top: 12px; }
+.hex-dump::after { content: ''; position: absolute; bottom: 0; left: 0; width: 100%; height: 40px; background: linear-gradient(transparent, #000); }
+</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-inner">
+      <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <h1>Incorrupt</h1>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+  </div>
+  <div class="nav-lbl">Dashboard</div>
+  <div class="nav">
+    <a href="/" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Upload</a>
+    <a href="/explorer" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg> Blockchain</a>
+  </div>
+  <div class="nav-lbl">Forense</div>
+  <div class="nav">
+    <a href="/verify" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Verificar Prova</a>
+    <a href="/analyse" class="nav-btn active"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Análise Prévia</a>
+    <a href="/custody" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M15 14l-3 3-3-3"/><path d="M12 17V9"/></svg> Gestão de Custódia</a>
+    <a href="/terminal" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> Terminal OS</a>
+    <a href="/chaos" class="nav-btn" style="color:#ff4444;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Simulador de Ataque</a>
+  </div>
+  <div class="sb-footer spotlight">
+    <div class="user-badge" id="userBadge" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> <span id="userBadgeText"></span></div>
+    <div class="badge off" id="serverBadge"><div class="dot"></div> <span id="serverStatus">A carregar...</span></div>
+    <button class="btn-logout" onclick="doLogout()">Terminar Sessão</button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <h2>Motor de Análise Forense</h2>
+    <div class="bft-tag">BFT CONSENSUS ACTIVE</div>
+  </div>
+
+  <div class="scroll-area">
+    <div class="panel spotlight">
+      <div class="panel-hdr">Extração de Metadados e Sinais de Adulteração</div>
+      <div class="panel-body">
+        
+        <div class="analyse-drop" id="analyseDropZone">
+          <div class="scanning-overlay" id="scanOverlay"></div>
+          <input type="file" id="analyseFile" onchange="doAnalyse(this.files[0])">
+          <svg id="dropIcon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="1.5" style="margin-bottom:16px; filter: drop-shadow(0 0 5px var(--acc))"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <h3 id="dropTitle" style="font-family:'Orbitron', sans-serif; letter-spacing:1px; color:var(--txt)">INICIAR ANÁLISE FORENSE</h3>
+          <p id="dropSub" style="color:var(--muted); font-size:13px; margin-top:8px">Arraste um ficheiro para varrimento</p>
+        </div>
+
+        <div id="analyseResult" style="display: none; margin-top: 24px;">
+          <div class="verdict-banner" id="verdictBanner">
+            <div>
+              <h3 id="verdictTitle" style="font-size:16px; margin-bottom:8px"></h3>
+              <p id="verdictDetail" style="font-size:14px; color:var(--muted)"></p>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div>
+              <div class="a-card">
+                <div class="a-card-hdr">Assinatura SHA-256 e Info</div>
+                <div class="a-card-body">
+                  <div class="a-row"><span class="k">SHA-256</span><span class="v" id="analyseHashDisplay" style="color:var(--acc)"></span></div>
+                  <div class="a-row"><span class="k">Ficheiro</span><span class="v" id="aFileName"></span></div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="a-card">
+                <div class="a-card-hdr">Anomalias Detectadas</div>
+                <div class="a-card-body" id="aSignalsBody"></div>
+              </div>
+            </div>
+          </div>
+          </div>
+
+          <div style="margin-top: 24px;">
+            <div class="a-card">
+              <div class="a-card-hdr">RAIO-X DE ENTROPIA FORENSE (SHANNON)</div>
+              <div class="a-card-body" style="height: 250px; position: relative;">
+                <canvas id="entropyChart"></canvas>
+                <div id="entropyVerdict" style="position: absolute; top: 10px; right: 20px; font-family:'Orbitron', sans-serif; font-size:12px; font-weight:bold; padding: 4px 8px; border-radius: 4px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<script src="/public/app.js"></script>
+<script>
+async function doAnalyse(file) {
+  if(!file) return;
+  const resultDiv = document.getElementById('analyseResult');
+  const overlay = document.getElementById('scanOverlay');
+  const dropTitle = document.getElementById('dropTitle');
+  const dropSub = document.getElementById('dropSub');
+  const dropIcon = document.getElementById('dropIcon');
+  
+  resultDiv.style.display = 'none';
+  overlay.style.display = 'block';
+  dropTitle.textContent = 'A EXECUTAR VARRIMENTO...';
+  dropSub.textContent = 'A extrair metadados e calcular assinaturas cryptográficas.';
+  dropIcon.style.stroke = 'var(--acc)';
+  
+  const form = new FormData(); form.append('file', file);
+  
+  // Calculate Shannon Entropy
+  const buffer = await file.arrayBuffer();
+  const view = new Uint8Array(buffer);
+  
+  // Adaptive chunking to prevent math caps on very small files (min 256 bytes per chunk if possible)
+  let chunksCount = 50;
+  if (view.length < 256) chunksCount = 1;
+  else if (view.length / chunksCount < 256) chunksCount = Math.floor(view.length / 256);
+  if (chunksCount < 1) chunksCount = 1;
+  
+  const chunkSize = Math.ceil(view.length / chunksCount);
+  const entropyData = [];
+  let avgEntropy = 0;
+  
+  for (let i = 0; i < chunksCount; i++) {
+    const start = i * chunkSize;
+    if (start >= view.length) break;
+    const end = Math.min(start + chunkSize, view.length);
+    const slice = view.subarray(start, end);
+    
+    const counts = new Array(256).fill(0);
+    for (let j = 0; j < slice.length; j++) {
+      counts[slice[j]]++;
+    }
+    
+    let entropy = 0;
+    for (let j = 0; j < 256; j++) {
+      const p = counts[j] / slice.length;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    entropyData.push(entropy);
+    avgEntropy += entropy;
+  }
+  if(entropyData.length > 0) avgEntropy /= entropyData.length;
+  
+  // Simulate scan delay for dramatic effect
+  await new Promise(r => setTimeout(r, 1500));
+  
+  try {
+    const resp = await fetch('http://localhost:8888/api/v1/analyse', { method:'POST', body: form });
+    const d = await resp.json();
+    
+    overlay.style.display = 'none';
+    resultDiv.style.display = 'block';
+    dropTitle.textContent = 'ANÁLISE CONCLUÍDA';
+    dropSub.textContent = 'Pode largar outro ficheiro para nova análise.';
+    dropIcon.style.stroke = 'var(--muted)';
+    
+    const banner = document.getElementById('verdictBanner');
+    banner.className = 'verdict-banner';
+    let isError = false;
+    
+    if(d.status === 'NEVER_SEEN') banner.classList.add('ok');
+    else if(d.status === 'ALREADY_REGISTERED') banner.classList.add('info');
+    else { banner.classList.add('err'); isError = true; }
+    
+    const titleEl = document.getElementById('verdictTitle');
+    titleEl.textContent = d.verdict || d.status;
+    if(isError) titleEl.classList.add('glitch-text'); else titleEl.classList.remove('glitch-text');
+    titleEl.setAttribute('data-text', titleEl.textContent);
+    
+    document.getElementById('verdictDetail').textContent = d.verdictDetail || '';
+    
+    const a = d.analysis || {};
+    document.getElementById('aFileName').textContent = file.name;
+    
+    const hashEl = document.getElementById('analyseHashDisplay');
+    scrambleText(hashEl, a.fileHash || '—', 1500);
+    
+    const signals = a.suspicionSignals || [];
+    let signalsHtml = signals.length ? 
+      signals.map(s=>`<div style="color:var(--err); padding:8px; background:rgba(255,0,60,0.1); border-left: 2px solid var(--err); border-radius:0 4px 4px 0; margin-bottom:8px; font-family:'JetBrains Mono'; font-size:12px; text-transform:uppercase;">> ERROR: ${s}</div>`).join('') : 
+      '<div style="color:var(--ok);font-size:13px; font-family:\'JetBrains Mono\'">> STATUS: SEGURO. NENHUM SINAL DE ADULTERAÇÃO.</div>';
+      
+    if (signals.length) {
+      signalsHtml += `<div class="hex-dump">
+0x00000000  4D 5A 90 00 03 00 00 00  04 00 00 00 FF FF 00 00  |MZ..............|
+0x00000010  B8 00 00 00 00 00 00 00  40 00 00 00 00 00 00 00  |........@.......|
+0x00000020  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+0x00000030  00 00 00 00 00 00 00 00  00 00 00 00 80 00 00 00  |................|
+0x00000040  0E 1F BA 0E 00 B4 09 CD  21 B8 01 4C CD 21 54 68  |........!..L.!Th|
+0x00000050  <span style="color:var(--err)">[CORRUPTED SECTOR DETECTED - METADATA MISMATCH]</span>
+</div>`;
+    }
+    document.getElementById('aSignalsBody').innerHTML = signalsHtml;
+    
+    // Render Entropy Chart
+    const ctx = document.getElementById('entropyChart').getContext('2d');
+    if (window.entropyChartInstance) window.entropyChartInstance.destroy();
+    
+    const isEncrypted = avgEntropy > 7.8;
+    const chartColor = isEncrypted ? 'rgba(255, 0, 60, 1)' : 'rgba(0, 255, 255, 1)';
+    const chartBg = isEncrypted ? 'rgba(255, 0, 60, 0.2)' : 'rgba(0, 255, 255, 0.2)';
+    
+    const verdictEl = document.getElementById('entropyVerdict');
+    if (isEncrypted) {
+        verdictEl.textContent = `AVISO: ENTROPIA ALTA (${avgEntropy.toFixed(2)}) - POSSÍVEL ENCRIPTAÇÃO/ESTEGANOGRAFIA`;
+        verdictEl.style.color = 'var(--err)';
+        verdictEl.style.background = 'rgba(255,0,60,0.1)';
+        verdictEl.classList.add('glitch-text');
+    } else {
+        verdictEl.textContent = `STATUS: ENTROPIA NORMAL (${avgEntropy.toFixed(2)})`;
+        verdictEl.style.color = 'var(--ok)';
+        verdictEl.style.background = 'rgba(0,255,170,0.1)';
+        verdictEl.classList.remove('glitch-text');
+    }
+    
+    window.entropyChartInstance = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: entropyData.map((_, i) => `Ch #${i+1}`),
+        datasets: [{
+          label: 'Shannon Entropy (Bits)',
+          data: entropyData,
+          borderColor: chartColor,
+          backgroundColor: chartBg,
+          borderWidth: 2,
+          pointRadius: 1,
+          pointBackgroundColor: chartColor,
+          fill: true,
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { 
+            beginAtZero: true, 
+            max: 8.0, 
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: chartColor, font: {family: 'Orbitron'} }
+          },
+          x: { 
+            grid: { display: false },
+            ticks: { color: 'var(--muted)', font: {family: 'Orbitron', size: 9} }
+          }
+        }
+      }
+    });
+      
+    showToast('Análise Completa', 'Relatório gerado com sucesso.', 'success');
+  } catch(e) {
+    overlay.style.display = 'none';
+    showToast('Erro de Análise', e.message, 'error');
+  }
+}
+</script>
+</body>
+</html>

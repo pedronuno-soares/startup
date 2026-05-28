@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Incorrupt — Blockchain Explorer</title>
+<link rel="stylesheet" href="/public/theme.css">
+<!-- Chart.js for premium data visualization -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Leaflet.js for interactive mapping -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <div class="brand-inner">
+      <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+      <h1>Incorrupt</h1>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg></button>
+  </div>
+  <div class="nav-lbl">Dashboard</div>
+  <div class="nav">
+    <a href="/" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg> Upload</a>
+    <a href="/explorer" class="nav-btn active"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg> Blockchain</a>
+  </div>
+  <div class="nav-lbl">Forense</div>
+  <div class="nav">
+    <a href="/verify" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Verificar Prova</a>
+    <a href="/analyse" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg> Análise Prévia</a>
+    <a href="/custody" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M15 14l-3 3-3-3"/><path d="M12 17V9"/></svg> Gestão de Custódia</a>
+    <a href="/terminal" class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg> Terminal OS</a>
+    <a href="/chaos" class="nav-btn" style="color:#ff4444;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Simulador de Ataque</a>
+  </div>
+  <div class="sb-footer spotlight">
+    <div class="user-badge" id="userBadge" style="display:none"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> <span id="userBadgeText"></span></div>
+    <div class="badge off" id="serverBadge"><div class="dot"></div> <span id="serverStatus">A carregar...</span></div>
+    <button class="btn-logout" onclick="doLogout()">Terminar Sessão</button>
+  </div>
+</aside>
+
+<main class="main">
+  <div class="topbar">
+    <h2>Blockchain Explorer</h2>
+    <div class="bft-tag">BFT CONSENSUS ACTIVE</div>
+  </div>
+
+  <div class="scroll-area">
+    
+    <!-- ACTIVITY CHART -->
+    <div class="panel spotlight">
+      <div class="panel-hdr">Atividade Recente (Últimos Registos)</div>
+      <div class="panel-body">
+        <canvas id="activityChart" style="max-height: 200px; width:100%"></canvas>
+      </div>
+    </div>
+
+    <div class="panel spotlight">
+      <div class="panel-hdr">
+        <span>Últimos Registos</span>
+        <button class="btn-sm" onclick="loadBlocks()" style="cursor:pointer">Atualizar Dados</button>
+      </div>
+      <div class="panel-body">
+        <div id="blockList" style="position:relative; display: flex; flex-direction: column; gap: 0; padding-left:24px;">
+          <!-- Skeleton loaders initially -->
+          <div class="skeleton" style="height: 100px; margin-bottom:12px"></div>
+          <div class="skeleton" style="height: 100px; margin-bottom:12px"></div>
+          <div class="skeleton" style="height: 100px; margin-bottom:12px"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="/public/app.js"></script>
+<script>
+let globalBlocks = [];
+let chartInstance = null;
+
+async function loadBlocks() {
+  const authToken = localStorage.getItem('dems_token');
+  const list = document.getElementById('blockList');
+  
+  // Show skeletons
+  list.innerHTML = `
+    <div class="skeleton" style="height: 100px;"></div>
+    <div class="skeleton" style="height: 100px;"></div>
+  `;
+  
+  try {
+    const d = await (await fetch('http://localhost:8888/api/v1/chain/blocks?limit=50', {
+      headers: {'Authorization': 'Bearer '+authToken}
+    })).json();
+    
+    if(!d.blocks || d.blocks.length === 0) { 
+      list.innerHTML = '<div style="text-align:center; padding:40px; color:var(--muted)">Nenhum bloco na cadeia ainda.</div>'; 
+      return; 
+    }
+    
+    const uStr = localStorage.getItem('dems_user');
+    const user = uStr ? JSON.parse(uStr) : {};
+    const currentUserEmail = user.email || '';
+
+    globalBlocks = d.blocks;
+    
+    list.innerHTML = d.blocks.map((b, index) => {
+      const isIPFS = b.fileCID && b.fileCID !== 'N/A' && b.fileCID !== 'CID_PENDING';
+      // MOCK IPFS para demo se estiver offline
+      const finalCID = (b.fileCID === 'CID_OFFLINE' || !isIPFS) ? 'QmZ4tDuvesek1363s11P8HDEbQ5YqR77h1y5Lnt8N7kP2T' : b.fileCID;
+      const ipfsLink = `<a href="https://gateway.pinata.cloud/ipfs/${finalCID}" target="_blank" style="color:var(--acc); text-decoration:none;">[IPFS Node]</a>`;
+      
+      const isOwner = b.actorEmail === currentUserEmail;
+      const blurStyle = isOwner ? '' : 'filter: blur(4px); pointer-events: none; user-select: none; opacity: 0.5;';
+
+      return `
+      <div style="position:relative; padding-bottom:32px;">
+        ${index < d.blocks.length - 1 ? `<div style="position:absolute; left:-18px; top:30px; bottom:-10px; width:2px; background:var(--acc); opacity:0.3; box-shadow:0 0 5px var(--acc)"></div>` : ''}
+        <div style="position:absolute; left:-24px; top:12px; width:14px; height:14px; border-radius:50%; background:var(--acc); box-shadow:0 0 10px var(--acc);"></div>
+        
+        <div class="spotlight" style="background:rgba(0,0,0,0.5); border:1px solid var(--brd); border-radius:4px; padding:16px; backdrop-filter:blur(10px);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="display:flex; gap:12px; align-items:center;">
+              <span style="background:var(--sur2); font-size:12px; font-weight:700; padding:4px 10px; border-radius:4px; font-family:'Orbitron', sans-serif; color:var(--acc)">BLOCO #${b.blockIndex}</span>
+              <span style="font-size:14px; font-weight:600; font-family:'Rajdhani', sans-serif; text-transform:uppercase">${b.fileName}</span>
+              ${!isOwner ? `<span style="background:rgba(255,0,0,0.1); color:#ff4444; border:1px solid #ff4444; font-size:9px; padding:2px 6px; border-radius:2px; font-weight:700; font-family:'Orbitron', sans-serif;">ACESSO RESTRITO</span>` : ''}
+            </div>
+            ${isOwner ? `<button class="btn-sm" onclick="exportPDF(${index})" style="font-family:'Orbitron', sans-serif; font-size:10px; border-color:var(--ok); color:var(--ok)">CERTIFICADO PDF</button>` : ''}
+          </div>
+          <div style="position:relative; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--muted); background:#000; padding:12px; border:1px solid var(--brd); border-radius:4px; margin-bottom:12px; overflow:hidden;">
+            ${!isOwner ? `<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:10; background:rgba(0,0,0,0.2);"><div style="color:#ff4444; font-family:'Orbitron', sans-serif; font-size:14px; font-weight:700; text-shadow:0 0 10px #ff4444;">[ CRIPTOGRAFADO ]</div></div>` : ''}
+            <div style="${blurStyle}">
+              <div style="margin-bottom:4px">HASH (BLOCO): <span style="color:var(--txt)">${b.currentHash}</span></div>
+              ${b.fileHash !== 'LEGACY' ? `<div style="margin-bottom:4px">HASH (PROVA): <span style="color:var(--ok)">${b.fileHash}</span></div>` : ''}
+              ${b.signature && b.signature !== 'NONE' ? `<div style="margin-bottom:4px">ASSINATURA E-ID: <span style="color:var(--warn)">${b.signature.substring(0,64)}...</span></div>` : ''}
+              <div>IPFS CID: ${ipfsLink}</div>
+            </div>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:24px; font-size:11px; color:var(--muted); font-family:'Orbitron', sans-serif">
+            <span>AÇÃO: <b style="color:var(--txt)">${b.action}</b></span>
+            <span>AUTOR: <b style="color:${isOwner ? 'var(--txt)' : '#ff4444'}">${isOwner ? b.actorEmail : 'CONFIDENCIAL'}</b></span>
+            <span>DATA: <b style="color:var(--txt)">${new Date(b.timestamp).toLocaleString('pt-PT')}</b> <span style="background:var(--ok); color:#000; font-size:9px; padding:2px 4px; border-radius:2px; margin-left:4px;">NTP SECURE</span></span>
+            <span>BFT: <b style="color:var(--acc)">${b.consensusCount}/3</b></span>
+          </div>
+          ${b.metadata && b.metadata !== 'NONE' ? `
+          <div style="position:relative; margin-top:16px; border-top:1px dashed ${b.action === 'CUSTODY_TRANSFER' ? 'rgba(150,0,255,0.3)' : 'rgba(255,100,100,0.3)'}; padding-top:12px;">
+            ${!isOwner ? `<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:10;"><div style="color:#ff4444; font-family:'Orbitron', sans-serif; font-size:12px; font-weight:700; text-shadow:0 0 10px #ff4444; background:rgba(0,0,0,0.8); padding:4px 8px; border-radius:4px;">ACESSO NEGADO</div></div>` : ''}
+            <div style="${blurStyle}">
+              <div style="color:${b.action === 'CUSTODY_TRANSFER' ? '#d488ff' : '#ff6464'}; font-size:11px; font-weight:700; font-family:'Orbitron', sans-serif; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                ${b.action === 'CUSTODY_TRANSFER' ? 'REGISTO DE TRANSFERÊNCIA DE CUSTÓDIA' : 'METADADOS FORENSES OCULTOS (EXIF)'}
+              </div>
+              <div style="display:flex; gap:16px; align-items:stretch;">
+                <div style="flex:1; background:${b.action === 'CUSTODY_TRANSFER' ? 'rgba(150,0,255,0.1)' : 'rgba(255,0,0,0.05)'}; padding:10px; border-radius:4px; font-family:'JetBrains Mono', monospace; font-size:10px; color:${b.action === 'CUSTODY_TRANSFER' ? '#d488ff' : '#ff9999'}; white-space:pre-wrap; overflow-wrap:break-word;">${b.metadata}</div>
+                ${(() => {
+                  try {
+                    const meta = JSON.parse(b.metadata);
+                    if (meta.latitude && meta.longitude) {
+                      return `<div id="map-${b.blockIndex}" style="flex:1; height:120px; border-radius:4px; border:1px solid rgba(255,100,100,0.3);"></div>`;
+                    }
+                  } catch(e) {}
+                  return '';
+                })()}
+              </div>
+            </div>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+    `}).join('');
+    
+    // Initialize maps after DOM update
+    setTimeout(() => {
+      d.blocks.forEach(b => {
+        if (b.metadata && b.metadata !== 'NONE') {
+          try {
+            const meta = JSON.parse(b.metadata);
+            if (meta.latitude && meta.longitude) {
+              const mapId = 'map-' + b.blockIndex;
+              if (document.getElementById(mapId)) {
+                const map = L.map(mapId).setView([meta.latitude, meta.longitude], 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                  attribution: '&copy; OpenStreetMap'
+                }).addTo(map);
+                L.marker([meta.latitude, meta.longitude]).addTo(map);
+              }
+            }
+          } catch(e) {}
+        }
+      });
+    }, 100);
+    
+    showToast('Sincronizado', 'Blocos atualizados com sucesso.', 'success');
+    updateChart(d.blocks);
+    
+  } catch(e) {
+    list.innerHTML = `<div style="color:var(--err); padding:20px;">Erro: ${e.message}</div>`;
+    showToast('Erro de Sincronização', e.message, 'error');
+  }
+}
+
+function updateChart(blocks) {
+  const ctx = document.getElementById('activityChart').getContext('2d');
+  
+  // Agrupar por data
+  const counts = {};
+  blocks.forEach(b => {
+    const d = new Date(b.timestamp).toLocaleDateString('pt-PT');
+    counts[d] = (counts[d] || 0) + 1;
+  });
+  
+  const labels = Object.keys(counts).reverse();
+  const data = Object.values(counts).reverse();
+  
+  if(chartInstance) chartInstance.destroy();
+  
+  chartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Provas & Acessos',
+        data: data,
+        backgroundColor: 'rgba(0, 255, 255, 0.4)',
+        borderColor: '#00ffff',
+        borderWidth: 1,
+        borderRadius: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, grid: { color: 'rgba(0, 255, 255, 0.1)' }, ticks: { color: '#00ffff', stepSize: 1, font: {family: 'Orbitron'} } },
+        x: { grid: { display: false }, ticks: { color: '#00ffff', font: {family: 'Orbitron'} } }
+      }
+    }
+  });
+}
+
+function exportPDF(index) {
+    const b = globalBlocks[index];
+    if (!b) return;
+    
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    
+    doc.setFillColor(3, 3, 5);
+    doc.rect(0, 0, 210, 297, 'F');
+    
+    doc.setTextColor(0, 255, 255);
+    doc.setFont("courier", "bold");
+    doc.setFontSize(22);
+    doc.text("INCORRUPT", 105, 30, { align: "center" });
+    
+    doc.setFontSize(14);
+    doc.setTextColor(255, 255, 255);
+    doc.text("CERTIFICADO FORENSE DE IMUTABILIDADE", 105, 40, { align: "center" });
+    
+    doc.setDrawColor(0, 255, 255);
+    doc.line(20, 45, 190, 45);
+    
+    doc.setFontSize(10);
+    doc.setFont("courier", "normal");
+    
+    let y = 60;
+    const addRow = (label, value) => {
+        doc.setTextColor(100, 116, 139);
+        doc.text(label + ":", 20, y);
+        doc.setTextColor(255, 255, 255);
+        doc.text(String(value).substring(0, 60), 70, y);
+        y += 10;
+    };
+    
+    addRow("ID DO BLOCO", "#" + b.blockIndex);
+    addRow("HASH DO BLOCO", b.currentHash.substring(0, 40) + "...");
+    addRow("DATA DE REGISTO", new Date(b.timestamp).toISOString() + ` (${b.timeSource || 'LOCAL'})`);
+    addRow("FICHEIRO", b.fileName);
+    addRow("TAMANHO", b.fileSize + " bytes");
+    y += 5;
+    addRow("SHA-256 (PROVA)", b.fileHash);
+    y += 5;
+    addRow("AUTOR", b.actorEmail + ` (${b.actorRole})`);
+    addRow("CHAVE PUBLICA", (b.publicKey && b.publicKey !== 'NONE') ? b.publicKey.substring(0, 40) + "..." : "N/A");
+    addRow("CONSENSO BFT", b.consensusCount + " Nós Confirmaram");
+    addRow("IPFS CID", b.fileCID && b.fileCID !== 'N/A' && b.fileCID !== 'CID_OFFLINE' ? b.fileCID : "OFFLINE");
+    
+    doc.setDrawColor(0, 255, 170);
+    doc.setFillColor(0, 255, 170, 0.1);
+    doc.rect(20, y+10, 170, 30, 'FD');
+    doc.setTextColor(0, 255, 170);
+    doc.setFont("courier", "bold");
+    doc.text("Este bloco esta encriptado e replicado no cluster BFT-Lite,", 105, y+22, { align: "center" });
+    doc.text("garantindo a imutabilidade criptografica absoluta do evento.", 105, y+30, { align: "center" });
+    
+    doc.save(`certificado_bloco_${b.blockIndex}_${b.fileName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+}
+
+document.addEventListener('DOMContentLoaded', loadBlocks);
+</script>
+</body>
+</html>

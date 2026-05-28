@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS Users (
     name          VARCHAR(255) NOT NULL,
     email         VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role          VARCHAR(50)  NOT NULL CHECK (role IN ('Investigador', 'Perito', 'Juiz', 'Admin')),
+    role          VARCHAR(50)  NOT NULL CHECK (role IN ('Investigador', 'Perito', 'Juiz', 'Admin', 'Utilizador')),
     created_at    TIMESTAMPTZ  DEFAULT NOW()
 );
 
